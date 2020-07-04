@@ -51,7 +51,6 @@ class FetchEnv(robot_env.RobotEnv):
         self.broken_object = False
         self.prev_stiffness = 250.0
         self.psv_prev_stiffness = 250.0
-        self.par_prev_stiffness = 0.0
         self.object_fragility = 0.0
         self.min_grip = 0.0
         self.fric_mu = 0.2
@@ -61,7 +60,7 @@ class FetchEnv(robot_env.RobotEnv):
         self.prev_oforce = 0.0
 
         super(FetchEnv, self).__init__(
-            model_path=model_path, n_substeps=n_substeps, n_actions=7,
+            model_path=model_path, n_substeps=n_substeps, n_actions=6,
             initial_qpos=initial_qpos)
 
     # GoalEnv methods
@@ -101,35 +100,28 @@ class FetchEnv(robot_env.RobotEnv):
         action = action.copy()  # ensure that we don't change the action outside of this scope
         pos_ctrl, gripper_ctrl = action[:3], action[3]
         stiffness_ctrl = action[4] #if action.shape == (5,) else 0.0
-        psv_stiffness_ctrl = action[5]
-        par_stiffness_ctrl = action[6] if action.shape == (7,) else 0.0
+        psv_stiffness_ctrl = action[5] if action.shape == (6,) else 0.0
 
         pos_ctrl *= 0.05  # limit maximum change in position
         rot_ctrl = [1., 0., 1., 0.]  # fixed rotation of the end effector, expressed as a quaternion
         stiffness_ctrl *= 50.0
-        psv_stiffness_ctrl *= 50.0
-        par_stiffness_ctrl *= 50.0 if action.shape == (7,) else 0.0
-#        print(psv_stiffness_ctrl)
+        psv_stiffness_ctrl *= 50.0 if action.shape == (6,) else 0.0
         
-        if action.shape == (7,):
-            self.par_prev_stiffness += par_stiffness_ctrl
-            self.par_prev_stiffness = np.max([np.min([self.par_prev_stiffness, 240.0]), 0.0])
-#            self.par_prev_stiffness = 125.0 if par_stiffness_ctrl > 0 else 0.0
-            
-            self.sim.model.jnt_stiffness[self.sim.model.joint_name2id('robot0:r_gripper_finger_joint')] = self.par_prev_stiffness
-            self.sim.model.jnt_stiffness[self.sim.model.joint_name2id('robot0:l_gripper_finger_joint')] = self.par_prev_stiffness
-            
         
-        self.psv_prev_stiffness += psv_stiffness_ctrl
-        self.psv_prev_stiffness = np.max([np.min([self.psv_prev_stiffness, 250.0 - self.par_prev_stiffness]), 10.0])
+        print(psv_stiffness_ctrl)
         
-        self.sim.model.actuator_gainprm[self.sim.model.actuator_name2id('robot0:l_gripper_finger_joint'), 0] = self.psv_prev_stiffness
-        self.sim.model.actuator_gainprm[self.sim.model.actuator_name2id('robot0:r_gripper_finger_joint'), 0] = self.psv_prev_stiffness
-        self.sim.model.actuator_biasprm[self.sim.model.actuator_name2id('robot0:l_gripper_finger_joint'), 1] = -self.psv_prev_stiffness
-        self.sim.model.actuator_biasprm[self.sim.model.actuator_name2id('robot0:r_gripper_finger_joint'), 1] = -self.psv_prev_stiffness
+        if action.shape == (6,):
+            self.psv_prev_stiffness += psv_stiffness_ctrl
+            self.psv_prev_stiffness = np.max([np.min([self.psv_prev_stiffness, 250.0]), 10.0])
             
-        self.prev_stiffness += stiffness_ctrl
-        self.prev_stiffness = np.max([np.min([self.prev_stiffness, self.par_prev_stiffness + self.psv_prev_stiffness]), self.par_prev_stiffness])
+            self.sim.model.actuator_gainprm[self.sim.model.actuator_name2id('robot0:l_gripper_finger_joint'), 0] = self.psv_prev_stiffness
+            self.sim.model.actuator_gainprm[self.sim.model.actuator_name2id('robot0:r_gripper_finger_joint'), 0] = self.psv_prev_stiffness
+            self.sim.model.actuator_biasprm[self.sim.model.actuator_name2id('robot0:l_gripper_finger_joint'), 1] = -self.psv_prev_stiffness
+            self.sim.model.actuator_biasprm[self.sim.model.actuator_name2id('robot0:r_gripper_finger_joint'), 1] = -self.psv_prev_stiffness
+            
+        stiffness_ctrl += self.prev_stiffness
+        stiffness_ctrl = np.max([np.min([stiffness_ctrl, self.psv_prev_stiffness]), 0.0])
+        self.prev_stiffness = stiffness_ctrl
         
         gripper_ctrl = np.array([gripper_ctrl, gripper_ctrl])
         assert gripper_ctrl.shape == (2,)
@@ -176,9 +168,8 @@ class FetchEnv(robot_env.RobotEnv):
 #            if self.sim.data.sensordata[2] > 100 and self.broken_table == False:
 #                self.sim.model.geom_matid[self.sim.model.body_geomadr[self.sim.model.body_name2id('table0')]] = 2
 #                self.broken_table = True
-            l_finger_force = (self.sim.data.ctrl[0] - self.sim.data.sensordata[self.sim.model.sensor_name2id('l_finger_jnt')]) * self.sim.model.actuator_gainprm[self.sim.model.actuator_name2id('robot0:l_gripper_finger_joint'), 0] - self.sim.data.sensordata[self.sim.model.sensor_name2id('l_finger_jnt')] * self.sim.model.jnt_stiffness[self.sim.model.joint_name2id('robot0:l_gripper_finger_joint')]
-            r_finger_force = (self.sim.data.ctrl[1] - self.sim.data.sensordata[self.sim.model.sensor_name2id('r_finger_jnt')]) * self.sim.model.actuator_gainprm[self.sim.model.actuator_name2id('robot0:r_gripper_finger_joint'), 0] - self.sim.data.sensordata[self.sim.model.sensor_name2id('r_finger_jnt')] * self.sim.model.jnt_stiffness[self.sim.model.joint_name2id('robot0:r_gripper_finger_joint')]
-            
+            l_finger_force = (self.sim.data.ctrl[0] - self.sim.data.sensordata[self.sim.model.sensor_name2id('l_finger_jnt')]) * self.sim.model.actuator_gainprm[self.sim.model.actuator_name2id('robot0:l_gripper_finger_joint'), 0]
+            r_finger_force = (self.sim.data.ctrl[1] - self.sim.data.sensordata[self.sim.model.sensor_name2id('r_finger_jnt')]) * self.sim.model.actuator_gainprm[self.sim.model.actuator_name2id('robot0:r_gripper_finger_joint'), 0]
             l_finger_force = self.prev_lforce + (l_finger_force - self.prev_lforce) * dt / 0.05
             r_finger_force = self.prev_rforce + (r_finger_force - self.prev_rforce) * dt / 0.05
             object_force = self.prev_oforce + (self.sim.data.sensordata[self.sim.model.sensor_name2id('object_frc')] - self.prev_oforce) * dt / 0.1
@@ -192,11 +183,11 @@ class FetchEnv(robot_env.RobotEnv):
 #            else:
 #                self.sim.model.geom_matid[self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]] = 3
 #                self.broken_object = 2.0
+                
             conc_stiffness_data = np.concatenate([[l_finger_force,
                                  r_finger_force,
                                  self.prev_stiffness,
-                                 self.psv_prev_stiffness,
-                                 self.par_prev_stiffness]])/1000.0
+                                 self.psv_prev_stiffness]])/1000.0
 #            print("Fragility:{}, minimum force:{}, grasping force:{}".format(self.object_fragility, self.min_grip*2, l_finger_force+r_finger_force))
 #            obs = np.concatenate([
 #                grip_pos, object_pos.ravel(), object_rel_pos.ravel(), gripper_state, object_rot.ravel(),
@@ -256,7 +247,6 @@ class FetchEnv(robot_env.RobotEnv):
         # reset stiffness
         self.prev_stiffness = 250.0
         self.psv_prev_stiffness = 250.0
-        self.par_prev_stiffness = 0.0
         
         # reset forces
         self.prev_lforce = 0.0
