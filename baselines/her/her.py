@@ -7,6 +7,7 @@ from mpi4py import MPI
 
 from baselines import logger
 from baselines.common import set_global_seeds, tf_util
+import tensorflow as tf
 from baselines.common.mpi_moments import mpi_moments
 
 from baselines.her.rollout import RolloutWorker
@@ -119,8 +120,8 @@ def learn(*, network, env, total_timesteps,
         # env
         'max_u': 1.,  # max absolute value of actions on different coordinates
         # ddpg
-        'layers': 3,  # number of layers in the critic/actor networks
-        'hidden': 256,  # number of neurons in each hidden layers
+        'layers': 2,  # number of layers in the critic/actor networks
+        'hidden': 32,  # number of neurons in each hidden layers
         'network_class': 'baselines.her.actor_critic:ActorCritic',
         'Q_lr': 0.001,  # critic learning rate
         'pi_lr': 0.001,  # actor learning rate
@@ -134,12 +135,12 @@ def learn(*, network, env, total_timesteps,
         'n_cycles': 50,  # per epoch
         'rollout_batch_size': 2,  # per mpi thread
         'n_batches': 40,  # training batches per cycle
-        'batch_size': 256,  # per mpi thread, measured in transitions and reduced to even multiple of chunk_length.
+        'batch_size': 1024,  # per mpi thread, measured in transitions and reduced to even multiple of chunk_length.
         'n_test_rollouts': 10,  # number of test rollouts per epoch, each consists of rollout_batch_size rollouts
         'test_with_polyak': False,  # run test episodes with the target network
         # exploration
-        'random_eps': 0.3,  # percentage of time a random action is taken
-        'noise_eps': 0.2,  # std of gaussian noise added to not-completely-random actions as a percentage of max_u
+        'random_eps': 0.2,  # percentage of time a random action is taken
+        'noise_eps': 0.3,  # std of gaussian noise added to not-completely-random actions as a percentage of max_u
         # HER
         'replay_strategy': 'future',  # supported modes: future, none
         'replay_k': 4,  # number of additional goals used for replay, only used if off_policy_data=future
@@ -149,8 +150,8 @@ def learn(*, network, env, total_timesteps,
     
         'bc_loss': 0, # whether or not to use the behavior cloning loss as an auxilliary loss
         'q_filter': 0, # whether or not a Q value filter should be used on the Actor outputs
-        'num_demo': 50, # number of expert demo episodes
-        'demo_batch_size': 128, #number of samples to be used from the demonstrations buffer, per mpi thread 128/1024 or 32/256
+        'num_demo': 25, # number of expert demo episodes
+        'demo_batch_size': 32, #number of samples to be used from the demonstrations buffer, per mpi thread 128/1024 or 32/256
         'prm_loss_weight': 0.001, #Weight corresponding to the primary loss
         'aux_loss_weight':  0.0078, #Weight corresponding to the auxilliary loss also called the cloning loss
         'perturb':  kwargs['pert_type'],
@@ -164,16 +165,16 @@ def learn(*, network, env, total_timesteps,
     params.update(**override_params)  # makes it possible to override any parameter
     with open(os.path.join(logger.get_dir(), 'params.json'), 'w') as f:
         json.dump(params, f)
-    params = config.prepare_params(params)
-    params['rollout_batch_size'] = env.num_envs
 
     if demo_file is not None:
         params['bc_loss'] = 1
         params['q_filter'] = 1
-        params['n_cycles'] = 40
-        params['batch_size'] = 1024
-        params['random_eps'] = 0.1
+        params['n_cycles'] = 20
+        params['batch_size'] = 64
+        params['random_eps'] = 0.0
         params['noise_eps'] = 0.1
+    params = config.prepare_params(params)
+    params['rollout_batch_size'] = env.num_envs
     params.update(kwargs)
 
     config.log_params(params, logger=logger)
@@ -218,6 +219,7 @@ def learn(*, network, env, total_timesteps,
     
     eval_env = eval_env or env
 
+    print("NAME={}".format(env))
     rollout_worker = RolloutWorker(env, policy, dims, logger, monitor=True, **rollout_params)
     evaluator = RolloutWorker(eval_env, policy, dims, logger, **eval_params)
 

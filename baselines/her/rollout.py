@@ -64,7 +64,7 @@ class RolloutWorker:
         ag[:] = self.initial_ag
 
         # generate episodes
-        obs, achieved_goals, acts, goals, successes, successes2 = [], [], [], [], [], []
+        obs, achieved_goals, acts, goals, successes, successes2, successes3 = [], [], [], [], [], [], []
         dones = []
         info_values = [np.empty((self.T - 1, self.rollout_batch_size, self.dims['info_' + key]), np.float32) for key in self.info_keys]
         Qs = []
@@ -82,8 +82,8 @@ class RolloutWorker:
                 u, Q = policy_output
                 Qs.append(Q)
                 Fs.append(np.abs(np.float32((o[:,11:13] * (o[:,11:13] < 0.0)).sum(axis=-1))).mean())
-                Ks.append(np.abs(np.float32(o[:,13].sum(axis=-1))).mean())
-#                Ks.append(0.25)
+                # Ks.append(np.abs(np.float32(o[:,13].sum(axis=-1))).mean())
+                Ks.append(0.25)
             else:
                 u = policy_output
             if u.ndim == 1:
@@ -94,14 +94,19 @@ class RolloutWorker:
             ag_new = np.empty((self.rollout_batch_size, self.dims['g']))
             success = np.zeros(self.rollout_batch_size)
             success2 = np.zeros(self.rollout_batch_size)
+            
+            success3 = np.zeros(self.rollout_batch_size)
             # compute new states and observations
             obs_dict_new, _, done, info = self.venv.step(u)
-#            self.venv.render()
+            # self.venv.render()
             o_new = obs_dict_new['observation']
             ag_new = obs_dict_new['achieved_goal']
             success = np.array([i.get('is_success', 0.0) for i in info])
-            success2 = (np.float32(o[:,11:13].sum(axis=-1))*1000.0 > -147.15/3*6)
+            # success2 = (np.float32(o[:,11:13].sum(axis=-1))*1000.0 > -147.15/3*6)
 #            success2 = np.float32(o[:,13] == 0.0)
+
+            success2 = (np.linalg.norm(o[:,-9:-6],axis=-1)) < 0.05
+            success3 = (np.linalg.norm(o[:,-6:-3],axis=-1)) < 0.05
             
 #            print(o_new[0,-4:])
 
@@ -125,6 +130,8 @@ class RolloutWorker:
             achieved_goals.append(ag.copy())
             successes.append(success.copy())
             successes2.append(success2.copy())
+            
+            successes3.append(success3.copy())
             acts.append(u.copy())
             goals.append(self.g.copy())
             o[...] = o_new
@@ -143,11 +150,13 @@ class RolloutWorker:
         # stats
         successful = np.array(successes)[-1, :]
         successful2 = np.array(successes2)
+        successful3 = np.array(successes3)
 #        successful2 = np.array(successes2)[-1, :]
         assert successful.shape == (self.rollout_batch_size,)
         success_rate = np.mean(successful)
         success_rate2 = np.mean(successful2.mean(axis=0))
-        success_rate3 = np.mean(successful2.min(axis=0) * successful)
+        success_rate3 = np.mean(successful3.mean(axis=0))
+        # success_rate3 = np.mean(successful2.min(axis=0) * successful)
 #        success_rate2 = np.mean(successful2)
         self.success_history.append(success_rate)
         self.success_history2.append(success_rate2)

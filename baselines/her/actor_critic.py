@@ -1,5 +1,6 @@
 import tensorflow as tf
 from baselines.her.util import store_args, nn
+import numpy as np
 
 
 class ActorCritic:
@@ -29,9 +30,15 @@ class ActorCritic:
         o = self.o_stats.normalize(self.o_tf)
         g = self.g_stats.normalize(self.g_tf)
         input_pi = tf.concat(axis=1, values=[o, g])  # for actor
-
+        
+        weightData = np.load('./hand_dapg/dapg/policies/saved_weights.npz', allow_pickle=True)
+        std = weightData['a_std']
+        mean = weightData['a_mean']
+        
         # Networks.
         with tf.variable_scope('pi'):
+            # self.pi_tf = mean + std * nn(
+            #     input_pi, [self.hidden] * self.layers + [self.dimu])
             self.pi_tf = self.max_u * tf.tanh(nn(
                 input_pi, [self.hidden] * self.layers + [self.dimu]))
         with tf.variable_scope('Q'):

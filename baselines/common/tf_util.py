@@ -355,21 +355,40 @@ def save_variables(save_path, variables=None, sess=None):
     joblib.dump(save_dict, save_path)
 
 def load_variables(load_path, variables=None, sess=None):
-    import joblib
-    sess = sess or get_session()
-    variables = variables or tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
-
-    loaded_params = joblib.load(os.path.expanduser(load_path))
-    restores = []
-    if isinstance(loaded_params, list):
-        assert len(loaded_params) == len(variables), 'number of variables loaded mismatches len(variables)'
-        for d, v in zip(loaded_params, variables):
-            restores.append(v.assign(d))
-    else:
-        for v in variables:
-            restores.append(v.assign(loaded_params[v.name]))
-
-    sess.run(restores)
+    # print(load_path)
+    # if load_path[-2:] == "pb":
+    #     sess = sess or get_session()
+    #     print("load graph")
+        
+    #     with tf.gfile.FastGFile(load_path,'rb') as f:
+    #         graph_def = tf.GraphDef()
+    #         graph_def.ParseFromString(f.read())
+    #     sess.graph.as_default()
+    #     tf.import_graph_def(graph_def, name='')
+    #     graph_nodes=[n for n in graph_def.node]
+    #     names = []
+    #     vals = []
+    #     for t in graph_nodes:
+    #        names.append(t.name)
+    #        vals.append(t.attr['value'])
+    #     print(names)
+    #     print(vals)
+    # else:
+        import joblib
+        sess = sess or get_session()
+        variables = variables or tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+    
+        loaded_params = joblib.load(os.path.expanduser(load_path))
+        restores = []
+        if isinstance(loaded_params, list):
+            assert len(loaded_params) == len(variables), 'number of variables loaded mismatches len(variables)'
+            for d, v in zip(loaded_params, variables):
+                restores.append(v.assign(d))
+        else:
+            for v in variables:
+                restores.append(v.assign(loaded_params[v.name]))
+    
+        sess.run(restores)
 
 # ================================================================
 # Shape adjustment for feeding into tf placeholders

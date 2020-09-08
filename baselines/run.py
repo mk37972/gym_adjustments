@@ -1,11 +1,17 @@
+#!/usr/bin/sh
+
 import sys
 import re
 import multiprocessing
 import os.path as osp
 import gym
+import mj_envs
+from mjrl.utils.gym_env import GymEnv
 from collections import defaultdict
 import tensorflow as tf
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 import numpy as np
+import copy
 
 from baselines.common.vec_env import VecFrameStack, VecNormalize, VecEnv
 from baselines.common.vec_env.vec_video_recorder import VecVideoRecorder
@@ -13,6 +19,8 @@ from baselines.common.cmd_util import common_arg_parser, parse_unknown_args, mak
 from baselines.common.tf_util import get_session
 from baselines import logger
 from importlib import import_module
+
+from baselines.common import set_global_seeds
 
 try:
     from mpi4py import MPI
@@ -59,8 +67,11 @@ def train(args, extra_args):
 
     learn = get_learn_function(args.alg)
     alg_kwargs = get_learn_function_defaults(args.alg, env_type)
+    extra_args['pert_type'] = args.perturb
+    extra_args['n_actions'] = args.algdim
     alg_kwargs.update(extra_args)
-
+    
+    env = None
     env = build_env(args)
     if args.save_video_interval != 0:
         env = VecVideoRecorder(env, osp.join(logger.get_dir(), "videos"), record_video_trigger=lambda x: x % args.save_video_interval == 0, video_length=args.save_video_length)
@@ -89,6 +100,7 @@ def build_env(args):
     nenv = args.num_env or ncpu
     alg = args.alg
     seed = args.seed
+    env_kwargs = dict(pert_type=args.perturb, n_actions=args.algdim)
 
     env_type, env_id = get_env_type(args)
 
@@ -110,7 +122,7 @@ def build_env(args):
         get_session(config=config)
 
         flatten_dict_observations = alg not in {'her'}
-        env = make_vec_env(env_id, env_type, args.num_env or 1, seed, reward_scale=args.reward_scale, flatten_dict_observations=flatten_dict_observations)
+        env = make_vec_env(env_id, env_type, args.num_env or 1, seed, env_kwargs=env_kwargs, reward_scale=args.reward_scale, flatten_dict_observations=flatten_dict_observations)
 
         if env_type == 'mujoco':
             env = VecNormalize(env, use_tf=True)
@@ -212,35 +224,102 @@ def main(args):
     else:
         rank = MPI.COMM_WORLD.Get_rank()
         configure_logger(args.log_path, format_strs=[])
-
+    
     model, env = train(args, extra_args)
-
+    
     if args.save_path is not None and rank == 0:
         save_path = osp.expanduser(args.save_path)
         model.save(save_path)
 
     if args.play:
         logger.log("Running trained model")
+        
+        
+        seed = 100
+        np.random.seed(seed)
+        set_global_seeds(seed)
+        
         obs = env.reset()
 
         state = model.initial_state if hasattr(model, 'initial_state') else None
         dones = np.zeros((1,))
 
         episode_rew = np.zeros(env.num_envs) if isinstance(env, VecEnv) else np.zeros(1)
-        while True:
+        forces_list = []
+        distance_list = []
+        episodeFor = []
+        episodeDis = []
+        
+#        actions_list = []
+#        obs_list =[]
+#        episodeAct = []
+#        episodeObs = []
+        
+        infos_list = []
+        episodeInfo = []
+        
+        for k in range(50000):
             if state is not None:
                 actions, _, state, _ = model.step(obs,S=state, M=dones)
             else:
                 actions, _, _, _ = model.step(obs)
-
-            obs, rew, done, _ = env.step(actions)
+                
+            distance = np.linalg.norm(obs['achieved_goal'][0][:3] - obs['desired_goal'][0][:3])
+            force = -np.sum((obs['achieved_goal'][0][3:]))*1000.0
+#            print(distance, force)
+#            tmpObs = dict(observation = np.concatenate([obs['observation'][0], [np.float32(0.25)]]),
+#                          achieved_goal = obs['achieved_goal'][0],
+#                          desired_goal = obs['desired_goal'][0])
+#            tmpAcs = np.concatenate([actions, [np.float32(0.0)]])
+#                
+#            episodeAct.append(tmpAcs)
+#            episodeObs.append(tmpObs)
+            
+            obs, rew, done, info = env.step(actions)
+            episodeInfo.append(info[0])
             episode_rew += rew
+            # if args.filename is None: env.render()
             env.render()
             done_any = done.any() if isinstance(done, np.ndarray) else done
+            
+            
+            
+            episodeFor.append(force)
+            episodeDis.append(distance)
+            
             if done_any:
                 for i in np.nonzero(done)[0]:
-                    print('episode_rew={}'.format(episode_rew[i]))
+                    print('episode_rew={}'.format(k))
                     episode_rew[i] = 0
+                infos_list.append(episodeInfo)
+                episodeInfo = []
+                
+                forces_list.append(episodeFor)
+                distance_list.append(episodeDis)
+                episodeFor = []
+                episodeDis = []
+                
+#                actions_list.append(episodeAct)
+#                obs_list.append(episodeObs)
+#                episodeAct = []
+#                episodeObs = []
+                
+                seed += 1000
+                np.random.seed(seed)
+                set_global_seeds(seed)
+                
+        
+                    
+#        fileName = "StiffnessCtrl_Demo"
+#        fileName += "_" + "random"
+#        fileName += "_" + str(1000)
+#        fileName += ".npz"
+    
+#        np.savez_compressed(fileName, acs=actions_list, obs=obs_list, info=infos_list) # save the file
+        if args.filename is not None: 
+            fileName = args.filename
+            fileName += ".npz"
+            np.savez_compressed(fileName, force=forces_list, dist=distance_list)
 
     env.close()
 

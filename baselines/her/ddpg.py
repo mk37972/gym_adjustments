@@ -147,12 +147,20 @@ class DDPG(object):
         }
 
         ret = self.sess.run(vals, feed_dict=feed)
+        # mean_val = self.sess.run(self.sess.graph.get_tensor_by_name('ddpg/o_stats/mean:0'))
+        # std_val = self.sess.run(self.sess.graph.get_tensor_by_name('ddpg/o_stats/std:0'))
+        # print("CHECK:{} ,{}".format(mean_val, std_val))
         # action postprocessing
         u = ret[0]
         noise = noise_eps * self.max_u * np.random.randn(*u.shape)  # gaussian noise
+        for noise_comp in noise: 
+            for i in range(8): noise_comp[i] = 0.0 # don't add randomness to the arm and wrist pose
         u += noise
         u = np.clip(u, -self.max_u, self.max_u)
-        u += np.random.binomial(1, random_eps, u.shape[0]).reshape(-1, 1) * (self._random_action(u.shape[0]) - u)  # eps-greedy
+        random_action = np.random.binomial(1, random_eps, u.shape[0]).reshape(-1, 1) * (self._random_action(u.shape[0]) - u)  # eps-greedy
+        for rand_comp in random_action:
+            for i in range(8): rand_comp[i] = 0.0 # don't add randomness to the arm and wrist pose
+        u += random_action
         if u.shape[0] == 1:
             u = u[0]
         u = u.copy()
@@ -267,6 +275,7 @@ class DDPG(object):
         self.pi_adam.update(pi_grad, self.pi_lr)
 
     def sample_batch(self):
+        
         if self.bc_loss: #use demonstration buffer to sample as well if bc_loss flag is set TRUE
             transitions =  self.buffer.sample(self.batch_size - self.demo_batch_size) #if self.n_epoch < 50 else self.buffer.sample(self.batch_size - np.int(self.demo_batch_size * np.power(0.99, self.n_epoch - 50)))
             global DEMO_BUFFER
@@ -340,7 +349,6 @@ class DDPG(object):
         batch_tf = OrderedDict([(key, batch[i])
                                 for i, key in enumerate(self.stage_shapes.keys())])
         batch_tf['r'] = tf.reshape(batch_tf['r'], [-1, 1])
-
         #choose only the demo buffer samples
         mask = np.concatenate((np.zeros(self.batch_size - self.demo_batch_size), np.ones(self.demo_batch_size)), axis = 0)
 
@@ -372,7 +380,7 @@ class DDPG(object):
             #define the cloning loss on the actor's actions only on the samples which adhere to the above masks
             self.cloning_loss_tf = tf.reduce_sum(tf.square(tf.boolean_mask(tf.boolean_mask((self.main.pi_tf), mask), maskMain, axis=0) - tf.boolean_mask(tf.boolean_mask((batch_tf['u']), mask), maskMain, axis=0)))
             self.pi_loss_tf = -self.prm_loss_weight * tf.reduce_mean(self.main.Q_pi_tf) #primary loss scaled by it's respective weight prm_loss_weight
-            self.pi_loss_tf += self.prm_loss_weight * self.action_l2 * tf.reduce_mean(tf.square(self.main.pi_tf / self.max_u)) #L2 loss on action values scaled by the same weight prm_loss_weight
+            # self.pi_loss_tf += self.prm_loss_weight * self.action_l2 * tf.reduce_mean(tf.square(self.main.pi_tf / self.max_u)) #L2 loss on action values scaled by the same weight prm_loss_weight
             self.pi_loss_tf += self.aux_loss_weight * self.cloning_loss_tf #* self.w_loss #adding the cloning loss to the actor loss as an auxilliary loss scaled by its weight aux_loss_weight
 
         elif self.bc_loss == 1 and self.q_filter == 0: # train with demonstrations without q_filter
@@ -412,8 +420,48 @@ class DDPG(object):
 
         # initialize all variables
         tf.variables_initializer(self._global_vars('')).run()
+        
+        # load weights from pretrained model
+        weightData = np.load('./hand_dapg/dapg/policies/saved_weights.npz', allow_pickle=True)
+        kernel1 = weightData['kernel1']
+        kernel2 = weightData['kernel2']
+        kernel3 = weightData['kernel3']
+        bias1 = weightData['bias1']
+        bias2 = weightData['bias2']
+        bias3 = weightData['bias3']
+        o_mean = weightData['o_mean']
+        o_std = weightData['o_std']
+        
+        # print([n.name for n in tf.get_default_graph().as_graph_def().node])
+        k1 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_0/kernel:0')
+        b1 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_0/bias:0')
+        k2 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_1/kernel:0')
+        b2 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_1/bias:0')
+        k3 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_2/kernel:0')
+        b3 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_2/bias:0')
+        o_m = self.sess.graph.get_tensor_by_name('ddpg/o_stats/mean:0')
+        o_s = self.sess.graph.get_tensor_by_name('ddpg/o_stats/std:0')
+        o_sumsq = self.sess.graph.get_tensor_by_name('ddpg/o_stats/sumsq:0')
+        o_sum = self.sess.graph.get_tensor_by_name('ddpg/o_stats/sum:0')
+        o_count = self.sess.graph.get_tensor_by_name('ddpg/o_stats/count:0')
+        
+        # feed the weights and biases, normalization stats
+        # self.sess.run(tf.assign(k1,tf.concat([tf.transpose(kernel1, perm=[1,0]), tf.zeros(shape=(9,32))],axis=0)))
+        # self.sess.run(tf.assign(k2,tf.transpose(kernel2, perm=[1,0])))
+        # self.sess.run(tf.assign(k3,tf.transpose(kernel3, perm=[1,0])))
+        # self.sess.run(tf.assign(b1,bias1))
+        # self.sess.run(tf.assign(b2,bias2))
+        # self.sess.run(tf.assign(b3,bias3))
+        # self.sess.run(tf.assign(o_m,o_mean))
+        # self.sess.run(tf.assign(o_s,o_std))
+        # self.sess.run(tf.assign(o_sum,o_mean*1e5))
+        # self.sess.run(tf.assign(o_sumsq,np.square(o_mean)*1e5))
+        # self.sess.run(tf.assign(o_count,[1e5]))
+        
+        
         self._sync_optimizers()
         self._init_target_net()
+        writer = tf.summary.FileWriter('./hand_dapg/dapg/policies/graphs', self.sess.graph)
 
     def logs(self, prefix=''):
         logs = []
@@ -421,6 +469,8 @@ class DDPG(object):
         logs += [('stats_o/std', np.mean(self.sess.run([self.o_stats.std])))]
         logs += [('stats_g/mean', np.mean(self.sess.run([self.g_stats.mean])))]
         logs += [('stats_g/std', np.mean(self.sess.run([self.g_stats.std])))]
+        # print('stats_o/mean: {}'.format(self.sess.run([self.o_stats.mean])))
+        # print('stats_o/std: {}'.format(self.sess.run([self.o_stats.std])))
 
         if prefix != '' and not prefix.endswith('/'):
             return [(prefix + '/' + key, val) for key, val in logs]
