@@ -81,6 +81,7 @@ class RobotEnv(gym.GoalEnv):
         did_reset_sim = False
         while not did_reset_sim:
             did_reset_sim = self._reset_sim()
+        self.sim.data.ctrl[:] *= 0.0
         self.goal = self._sample_goal().copy()
         obs = self._get_obs()
         return obs

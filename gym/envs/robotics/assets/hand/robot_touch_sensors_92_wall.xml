@@ -1,20 +1,21 @@
 <!-- See LICENSE.md for legal notices. LICENSE.md must be kept together with this file. -->
 <mujoco>
-    <body name="robot0:hand mount" pos="1 1.25 0.15" euler="1.5708 0 1.5708">
+    <body name="robot0:hand mount" pos="1 1.2 0.5" euler="2.35619 0 0">
         <inertial mass="0.1" pos="0 0 0" diaginertia="0.001 0.001 0.001"></inertial>
         <body childclass="robot0:asset_class" name="robot0:forearm" pos="0 0.01 0" euler="0 0 0">
             <inertial pos="0.001 -0.002 0.29" quat="0.982 -0.016 0 -0.188" mass="0.4" diaginertia="0.01 0.01 0.0075"></inertial>
-            <joint name="robot0:WRJ2" type="slide" pos="0 0 0" axis="0 0 1" range="-0.3 0.2" damping="20"></joint>
+            <joint name="robot0:WRJ2" type="slide" pos="0 0 0" axis="0 0 1" range="-0.5 0.5" damping="40"></joint>
+            <joint name="robot0:WRJ1" type="slide" pos="0 0 0" axis="1 0 0" range="-0.5 0.5" damping="40" armature="0.005" user="1123"></joint>
             <geom class="robot0:D_Vizual" pos="0 0.01 0.04" name="robot0:V_forearm" mesh="robot0:forearm" euler="0 0 1.57"></geom>
             <geom class="robot0:DC_Hand" name="robot0:C_forearm" type="mesh" mesh="robot0:forearm_cvx" pos="0 0.01 0.04" euler="0 0 1.57" rgba="0.4 0.5 0.6 0.7"></geom>
             <body name="robot0:wrist" pos="0 0 0.256">
                 <inertial pos="0.003 0 0.016" quat="0.504 0.496 0.495 0.504" mass="0.3" diaginertia="0.001 0.001 0.001"></inertial>
-                <joint name="robot0:WRJ1" type="hinge" pos="0 0 0" axis="0 1 -1" range="-1 0.5" damping="20" armature="0.005" user="1123"></joint>
+                <!--joint name="robot0:WRJ1" type="hinge" pos="0 0 0" axis="0 1 -1" range="-1 0.5" damping="20" armature="0.005" user="1123"></joint-->
                 <geom class="robot0:D_Vizual" name="robot0:V_wrist" mesh="robot0:wrist"></geom>
                 <geom class="robot0:DC_Hand" name="robot0:C_wrist" type="capsule" pos="0 0 0" quat="0.707 0.707 0 0" size="0.015 0.01" rgba="0.4 0.5 0.6 0.1"></geom>
                 <body name="robot0:palm" pos="0 0 0.034">
                     <inertial pos="0.006 0 0.036" quat="0.716 0.044 0.075 0.693" mass="0.3" diaginertia="0.001 0.001 0.001"></inertial>
-                    <joint name="robot0:WRJ0" type="hinge" pos="0 0 0" axis="1 0 0" range="0 1" damping="20" armature="0.005" user="1122"></joint>
+                    <joint name="robot0:WRJ0" type="hinge" pos="0 0 0" axis="1 0 0" range="0 1" damping="3" armature="0.005" user="1122"></joint>
                     <geom class="robot0:D_Vizual" name="robot0:V_palm" mesh="robot0:palm"></geom>
                     <geom class="robot0:DC_Hand" name="robot0:C_palm0" type="box" pos="0.011 0 0.038" size="0.032 0.0111 0.049" rgba="0.4 0.5 0.6 0.1"></geom>
                     <geom class="robot0:DC_Hand" name="robot0:C_palm1" type="box" pos="-0.032 0 0.014" size="0.011 0.0111 0.025" rgba="0.4 0.5 0.6 0.1"></geom>
@@ -31,15 +32,15 @@
                                 <geom class="robot0:DC_Hand" name="robot0:C_ffmiddle" type="capsule" pos="0 0 0.0125" size="0.00805 0.0125"></geom>
                                 <body name="robot0:ffdistal" pos="0 0 0.025">
                                     <inertial pos="0 0 0.015" quat="0.707 -0.003 0.003 0.707" mass="0.01" diaginertia="1e-05 1e-05 1e-05"></inertial>
-                                    <geom class="robot0:D_Vizual" name="robot0:V_ffdistal" pos="0 0 0.001" mesh="robot0:F1"></geom>
-                                    <geom class="robot0:DC_Hand" name="robot0:C_ffdistal" type="capsule" pos="0 0 0.012" size="0.00705 0.012" condim="4"></geom>
-                                    <site name="robot0:S_fftip" pos="0 0 0.026" group="3"></site>
-                                    <site class="robot0:D_Touch" name="robot0:Tch_fftip"></site>
-                                    <site name="robot0:T_fftip_front_left"  type="box"      pos="-0.00451 -0.00451 0.012" size="0.00451 0.00451 0.01905" rgba="1 0 0 0.33"/>
-                                    <site name="robot0:T_fftip_front_right" type="box"      pos="0.00451 -0.00451 0.012"  size="0.00451 0.00451 0.01905" rgba="0 0 0 0.33"/>
-                                    <site name="robot0:T_fftip_back_left"   type="box"      pos="-0.00451 0.00451 0.012"  size="0.00451 0.00451 0.01905" rgba="0 0 0 0.33"/>
-                                    <site name="robot0:T_fftip_back_right"  type="box"      pos="0.00451 0.00451 0.012"   size="0.00451 0.00451 0.01905" rgba="1 0 0 0.33"/>
-                                    <site name="robot0:T_fftip_tip"         type="sphere"   pos="0 0 0.024"               size="0.008"                   rgba="1 1 0 0.33"/>
+                                    <geom class="robot0:D_Vizual" name="robot0:V_ffdistal"  group="1" pos="0 0 0.001" mesh="robot0:F1"></geom>
+                                    <geom class="robot0:DC_Hand" name="robot0:C_ffdistal" group="4" type="capsule" pos="0 0 0.012" size="0.0105 0.012" condim="4"></geom>
+                                    <site name="robot0:S_fftip" pos="0 0 0.026" group="4"></site>
+                                    <site class="robot0:D_Touch" name="robot0:grip"></site>
+                                    <site name="robot0:T_fftip_front_left"  type="box"  group="4"    pos="-0.00451 -0.00451 0.012" size="0.00451 0.00451 0.01905" rgba="1 0 0 0.33"/>
+                                    <site name="robot0:T_fftip_front_right" type="box"  group="4"    pos="0.00451 -0.00451 0.012"  size="0.00451 0.00451 0.01905" rgba="0 0 0 0.33"/>
+                                    <site name="robot0:T_fftip_back_left"   type="box"  group="4"    pos="-0.00451 0.00451 0.012"  size="0.00451 0.00451 0.01905" rgba="0 0 0 0.33"/>
+                                    <site name="robot0:T_fftip_back_right"  type="box"  group="4"    pos="0.00451 0.00451 0.012"   size="0.00451 0.00451 0.01905" rgba="1 0 0 0.33"/>
+                                    <site name="robot0:T_fftip_tip"         type="sphere" group="4"  pos="0 0 0.024"               size="0.008"                   rgba="1 1 0 0.33"/>
                                 </body>
                             </body>
                         </body>
