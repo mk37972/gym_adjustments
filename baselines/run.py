@@ -265,8 +265,10 @@ def main(args):
                 actions, _, _, _ = model.step(obs)
                 
             distance = np.linalg.norm(obs['achieved_goal'][0][:3] - obs['desired_goal'][0][:3])
-            force = -np.sum((obs['achieved_goal'][0][3:]))*1000.0
-#            print(distance, force)
+            # force = -np.sum((obs['achieved_goal'][0][3:]))*100.0
+            force = env.envs[0].env.prev_oforce
+            print(force, env.envs[0].env.object_fragility, force>env.envs[0].env.object_fragility)
+            print(obs['observation'][0][11:13] ,actions)
 #            tmpObs = dict(observation = np.concatenate([obs['observation'][0], [np.float32(0.25)]]),
 #                          achieved_goal = obs['achieved_goal'][0],
 #                          desired_goal = obs['desired_goal'][0])

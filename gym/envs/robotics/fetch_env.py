@@ -49,7 +49,7 @@ class FetchEnv(robot_env.RobotEnv):
         self.parallel_on = parallel_on
         self.broken_table = False
         self.broken_object = False
-        self.max_stiffness = 50
+        self.max_stiffness = 250.0 if self.model_path.find('wall') == -1 else 50.0
         self.prev_stiffness = self.max_stiffness
         self.psv_prev_stiffness = self.max_stiffness
         self.par_prev_stiffness = 0.0
@@ -65,6 +65,7 @@ class FetchEnv(robot_env.RobotEnv):
         self.previous_input = 0
         self.pert_type = pert_type
         self.remaining_timestep = 50
+        self.goaldim = 3 if self.model_path.find('wall') == -1 else 6
 
         super(FetchEnv, self).__init__(
             model_path=model_path, n_substeps=n_substeps, n_actions=n_actions,
@@ -77,13 +78,13 @@ class FetchEnv(robot_env.RobotEnv):
         # Compute distance between goal and the achieved goal.
         if self.fragile_on:
             try: 
-                d = goal_distance(achieved_goal[:,:3], goal[:,:3])
-                fragile_goal = np.linalg.norm((achieved_goal[:,3:] - goal[:,3:])*((achieved_goal[:,3:] - goal[:,3:]) < 0), axis=-1)
+                d = goal_distance(achieved_goal[:,:self.goaldim], goal[:,:self.goaldim])
+                fragile_goal = np.linalg.norm((achieved_goal[:,self.goaldim:] - goal[:,self.goaldim:])*((achieved_goal[:,self.goaldim:] - goal[:,self.goaldim:]) < 0), axis=-1) if self.model_path.find('wall') == -1 else np.linalg.norm((achieved_goal[:,self.goaldim:] - goal[:,self.goaldim:])*((achieved_goal[:,self.goaldim:] - goal[:,self.goaldim:]) > 0), axis=-1)
             except: 
-                d = goal_distance(achieved_goal[:3], goal[:3])
-                fragile_goal = np.linalg.norm((achieved_goal[3:] - goal[3:])*((achieved_goal[3:] - goal[3:]) < 0), axis=-1)
+                d = goal_distance(achieved_goal[:self.goaldim], goal[:self.goaldim])
+                fragile_goal = np.linalg.norm((achieved_goal[self.goaldim:] - goal[self.goaldim:])*((achieved_goal[self.goaldim:] - goal[self.goaldim:]) < 0), axis=-1) if self.model_path.find('wall') == -1 else np.linalg.norm((achieved_goal[self.goaldim:] - goal[self.goaldim:])*((achieved_goal[self.goaldim:] - goal[self.goaldim:]) > 0), axis=-1)
             if self.reward_type == 'sparse':
-                
+                # print(d)
                 return -(d > self.distance_threshold).astype(np.float32) - np.float32(fragile_goal) * 2.0# - np.float32(penalty)/50.0
             else:
                 return -d
@@ -166,12 +167,12 @@ class FetchEnv(robot_env.RobotEnv):
             
             if action.shape[0] > 3:
                 if action.shape[0] > 4:
-                    psv_stiffness_ctrl = 0.2 * self.max_stiffness * action[4]
+                    psv_stiffness_ctrl = 0.2*self.max_stiffness * action[4]
                     
                     self.psv_prev_stiffness += psv_stiffness_ctrl
-                    self.psv_prev_stiffness = np.max([np.min([self.psv_prev_stiffness, self.max_stiffness - self.par_prev_stiffness]), self.max_stiffness / 25.0])
+                    self.psv_prev_stiffness = np.max([np.min([self.psv_prev_stiffness, self.max_stiffness - self.par_prev_stiffness]), 10.0])
                 
-                stiffness_ctrl = 0.2 * self.max_stiffness * action[3]
+                stiffness_ctrl = 0.2*self.max_stiffness * action[3]
                 
                 self.prev_stiffness += stiffness_ctrl
                 self.prev_stiffness = np.max([np.min([self.prev_stiffness, self.par_prev_stiffness + self.psv_prev_stiffness]), self.par_prev_stiffness])
@@ -186,7 +187,7 @@ class FetchEnv(robot_env.RobotEnv):
             
             
         # Apply action to simulation.
-        utils.ctrl_set_action(self.sim, action, self.stiffness_on, Chip=(self.model_path.find('wall') == -1))
+        utils.ctrl_set_action(self.sim, action, self.stiffness_on, Chip=(self.model_path.find('wall') != -1))
         if self.model_path.find('wall') == -1: utils.mocap_set_action(self.sim, action)
 
     def _get_obs(self):
@@ -211,7 +212,8 @@ class FetchEnv(robot_env.RobotEnv):
             object_rel_pos = object_pos - grip_pos
             grip_rel_pos = self.goal.copy()[:3] - grip_pos
             if self.pert_type != 'none' and self.pert_type != 'meas':
-                if np.linalg.norm(object_rel_pos) < 0.03: self.sim.data.qvel[self.sim.model.joint_name2id('object0:joint')+1] += np.random.random()*1.0-0.5
+                ind = 1 if self.model_path.find('wall') == -1 else 0
+                if np.linalg.norm(object_rel_pos) < 0.03: self.sim.data.qvel[self.sim.model.joint_name2id('object0:joint')+ind] += np.random.random()*1.0-0.5
             object_velp -= grip_velp
         else:
             object_pos = object_rot = object_velp = object_velr = object_rel_pos = np.zeros(0)
@@ -241,9 +243,9 @@ class FetchEnv(robot_env.RobotEnv):
                 if (object_force > self.object_fragility):
                     self.sim.model.geom_matid[self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]] = 4
                     self.broken_object = 1.0
-                elif object_force > 0.0:
-                    self.sim.model.geom_matid[self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]] = 3
-                    self.broken_object = 0.0
+                # elif object_force > 0.0:
+                #     self.sim.model.geom_matid[self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]] = 3
+                #     self.broken_object = 0.0
                 
                 if self.n_actions == 4:
                     conc_stiffness_data = np.concatenate([[l_finger_force,
@@ -273,7 +275,7 @@ class FetchEnv(robot_env.RobotEnv):
                 self.prev_rforce = r_finger_force
                 self.prev_oforce = object_force
             else:
-                finger_force = (self.sim.data.ctrl[0] - self.sim.data.sensordata[self.sim.model.sensor_name2id('robot0:Sjp_WRJ0')]) * self.sim.model.actuator_gainprm[self.sim.model.actuator_name2id('robot0:A_WRJ0'), 0] - self.sim.data.sensordata[self.sim.model.sensor_name2id('robot0:Sjp_WRJ0')] * self.sim.model.jnt_stiffness[self.sim.model.joint_name2id('robot0:WRJ0')]
+                finger_force = (self.sim.data.ctrl[2] - self.sim.data.sensordata[self.sim.model.sensor_name2id('robot0:Sjp_WRJ0')]) * self.sim.model.actuator_gainprm[self.sim.model.actuator_name2id('robot0:A_WRJ0'), 0] - self.sim.data.sensordata[self.sim.model.sensor_name2id('robot0:Sjp_WRJ0')] * self.sim.model.jnt_stiffness[self.sim.model.joint_name2id('robot0:WRJ0')]
                 finger_force = self.prev_force + (finger_force - self.prev_force) * dt / 0.05
                 
                 object_force = self.prev_oforce + (self.sim.data.sensordata[self.sim.model.sensor_name2id('object_frc')] - self.prev_oforce) * dt / 0.1
@@ -283,18 +285,22 @@ class FetchEnv(robot_env.RobotEnv):
                 elif self.n_actions == 4:
                     conc_stiffness_data = np.concatenate([[finger_force,
                                          self.prev_stiffness]])/100.0
+                elif self.n_actions == 5:
+                    conc_stiffness_data = np.concatenate([[finger_force,
+                                         self.prev_stiffness,
+                                         self.psv_prev_stiffness]])/100.0
                 
                 if (object_force > self.object_fragility):
                     self.sim.model.geom_matid[self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]:self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]+4] = 6
                     self.broken_object = 1.0
-                elif object_force > 0.0:
-                    self.sim.model.geom_matid[self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]:self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]+4] = 5
-                    self.broken_object = 0.0
+                # elif object_force > 0.0:
+                #     self.sim.model.geom_matid[self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]:self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]+4] = 5
+                #     self.broken_object = 0.0
                     
                 obs = np.concatenate([
-                    grip_pos, object_rel_pos.ravel(), [robot_qpos[2]], goal_rel_pos.ravel(), conc_stiffness_data
+                    grip_pos, object_rel_pos.ravel(), [robot_qpos[2]], goal_rel_pos.ravel(), object_velp, conc_stiffness_data
                 ])
-                achieved_goal = np.concatenate([achieved_goal, conc_stiffness_data[:1]])
+                achieved_goal = np.concatenate([achieved_goal, object_velp, conc_stiffness_data[:1]])
                 
                 self.prev_force = finger_force
                 self.prev_oforce = object_force
@@ -370,9 +376,9 @@ class FetchEnv(robot_env.RobotEnv):
             initial_qpos[:3] = initial_pos
             self.sim.data.set_joint_qpos('object0:joint', initial_qpos)
         if self.fragile_on:
-            self.sim.model.body_mass[self.sim.model.body_name2id('object0')] = 0.1 #np.random.random() * 5.0
+            self.sim.model.body_mass[self.sim.model.body_name2id('object0')] = 2.0 if self.model_path.find('wall') == -1 else 0.1
             self.min_grip = self.sim.model.body_mass[self.sim.model.body_name2id('object0')] * self.grav_const / (2 * self.fric_mu)
-            self.object_fragility = 6.0 * self.min_grip #5.0 * np.random.random() * self.min_grip + 2.0 * self.min_grip
+            self.object_fragility = 6.0 * self.min_grip if self.model_path.find('wall') == -1 else 200.0
         elif self.has_object:
             initial_qpos = self.sim.data.get_joint_qpos('object0:joint').copy()
             initial_qpos[:3] += np.array([np.random.random()*0.5-0.25, 0, 0])
@@ -389,14 +395,14 @@ class FetchEnv(robot_env.RobotEnv):
             if self.target_in_the_air and self.np_random.uniform() < 0.5:
                 goal[2] += self.np_random.uniform(0, 0.45)
         elif self.has_object:
-            offset = np.array([0.5*np.random.random()-0.27, 0.35*np.random.random(), 0.0])
+            offset = np.array([0.45*np.random.random()-0.24, 0.30*np.random.random(), 0.0])
             offset[2] = offset[1]
             goal = np.array([1.015, 0.78, -0.09]) + offset
         else:
             goal = self.initial_gripper_xpos[:3] + self.np_random.uniform(-0.15, 0.15, size=3)
             
         if self.model_path.find('wall') == -1: return np.concatenate([goal.copy(), [0.0, 0.0]])
-        else: return np.concatenate([goal.copy(), [0.0]])
+        else: return np.concatenate([goal.copy(), [0.0, 0.0, 0.0, 0.0]])
 
     def _is_success(self, achieved_goal, desired_goal):
         if self.fragile_on:

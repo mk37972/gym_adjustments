@@ -56,12 +56,15 @@ def train(*, policy, rollout_worker, evaluator,
         # record logs
         logger.record_tabular('epoch', epoch)
         for key, val in evaluator.logs('test'):
-            logger.record_tabular(key, mpi_average(val))
+            avg = mpi_average(val)
+            logger.record_tabular(key, avg)
+            # if key == 'test/success_rate3':
+            #     if avg > 0.90: policy.remove_demo = 1
         for key, val in rollout_worker.logs('train'):
             avg = mpi_average(val)
             logger.record_tabular(key, avg)
-            if key == 'train/success_rate':
-                if avg > 0.8: policy.remove_demo = 1
+            # if key == 'train/success_rate':
+            #     if avg > 0.65: policy.remove_demo = 1
         for key, val in policy.logs():
             logger.record_tabular(key, mpi_average(val))
 
@@ -120,8 +123,8 @@ def learn(*, network, env, total_timesteps,
         # env
         'max_u': 1.,  # max absolute value of actions on different coordinates
         # ddpg
-        'layers': 2,  # number of layers in the critic/actor networks
-        'hidden': 32,  # number of neurons in each hidden layers
+        'layers': 3,  # number of layers in the critic/actor networks
+        'hidden': 256,  # number of neurons in each hidden layers
         'network_class': 'baselines.her.actor_critic:ActorCritic',
         'Q_lr': 0.001,  # critic learning rate
         'pi_lr': 0.001,  # actor learning rate
@@ -135,7 +138,7 @@ def learn(*, network, env, total_timesteps,
         'n_cycles': 50,  # per epoch
         'rollout_batch_size': 2,  # per mpi thread
         'n_batches': 40,  # training batches per cycle
-        'batch_size': 1024,  # per mpi thread, measured in transitions and reduced to even multiple of chunk_length.
+        'batch_size': 256,  # per mpi thread, measured in transitions and reduced to even multiple of chunk_length.
         'n_test_rollouts': 10,  # number of test rollouts per epoch, each consists of rollout_batch_size rollouts
         'test_with_polyak': False,  # run test episodes with the target network
         # exploration
@@ -151,7 +154,7 @@ def learn(*, network, env, total_timesteps,
         'bc_loss': 0, # whether or not to use the behavior cloning loss as an auxilliary loss
         'q_filter': 0, # whether or not a Q value filter should be used on the Actor outputs
         'num_demo': 25, # number of expert demo episodes
-        'demo_batch_size': 32, #number of samples to be used from the demonstrations buffer, per mpi thread 128/1024 or 32/256
+        'demo_batch_size': 128, #number of samples to be used from the demonstrations buffer, per mpi thread 128/1024 or 32/256
         'prm_loss_weight': 0.001, #Weight corresponding to the primary loss
         'aux_loss_weight':  0.0078, #Weight corresponding to the auxilliary loss also called the cloning loss
         'perturb':  kwargs['pert_type'],
@@ -170,9 +173,9 @@ def learn(*, network, env, total_timesteps,
         params['bc_loss'] = 1
         params['q_filter'] = 1
         params['n_cycles'] = 20
-        params['batch_size'] = 64
-        params['random_eps'] = 0.0
-        params['noise_eps'] = 0.1
+        # params['random_eps'] = 0.1
+        # params['noise_eps'] = 0.1
+        # params['batch_size']: 1024
     params = config.prepare_params(params)
     params['rollout_batch_size'] = env.num_envs
     params.update(kwargs)

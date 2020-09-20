@@ -10,7 +10,7 @@ infos = []
 render = 1
 
 def main():
-    env = gym.make('FetchPickAndPlaceFragile-v1')
+    env = gym.make('FetchPickAndPlaceFragile-v2')
     numItr = 25
     initStateSpace = "random"
     env.reset()
@@ -22,16 +22,16 @@ def main():
         print("ITERATION NUMBER ", len(actions))
         goToGoal(env, obs,numItr)
     
-    for i in [4,5,6]:
-        fileName = "data"
+    for i in [3,4,5]:
+        fileName = "data_chip"
         fileName += "_" + initStateSpace
         fileName += "_" + str(numItr)
         fileName += "_bad{}dim".format(i)
         fileName += ".npz"
-        if i == 5 or i == 6:
+        if i == 4 or i == 5:
             for j in range(numItr):
                 for k in range(env._max_episode_steps):
-                    observations[j][k]['observation'] = np.concatenate([observations[j][k]['observation'], [0.25]])
+                    observations[j][k]['observation'] = np.concatenate([observations[j][k]['observation'], [0.5]])
                     actions[j][k] = np.concatenate([actions[j][k], [0.0]])
     
         np.savez_compressed(fileName, acs=actions, obs=observations, info=infos) # save the file for
@@ -62,81 +62,6 @@ def goToGoal(env, lastObs,numItr):
     episodeObs.append(lastObs)
     
     actiondim = 3
-    
-    while np.linalg.norm(object_oriented_goal) >= 0.005 and timeStep <= env._max_episode_steps:
-        env.render()
-        action = [0, 0, 0, 0]
-        object_oriented_goal = object_rel_pos.copy()
-        object_oriented_goal[2] += 0.03
-
-        for i in range(len(object_oriented_goal)):
-            action[i] = object_oriented_goal[i]*6
-
-        action[len(action)-1] = 0.05 #open
-
-        obsDataNew, reward, done, info = env.step(action)
-        timeStep += 1
-
-        episodeAcs.append(action)
-        episodeInfo.append(info)
-        episodeObs.append(obsDataNew)
-
-        objectPos = obsDataNew['observation'][3:6]
-        object_rel_pos = obsDataNew['observation'][6:9]
-
-    while np.linalg.norm(object_rel_pos) >= 0.005 and timeStep <= env._max_episode_steps :
-        env.render()
-        action = [0, 0, 0, 0]
-        for i in range(len(object_rel_pos)):
-            action[i] = object_rel_pos[i]*6
-
-        action[len(action)-1] = -0.005
-
-        obsDataNew, reward, done, info = env.step(action)
-        timeStep += 1
-
-        episodeAcs.append(action)
-        episodeInfo.append(info)
-        episodeObs.append(obsDataNew)
-
-        objectPos = obsDataNew['observation'][3:6]
-        object_rel_pos = obsDataNew['observation'][6:9]
-
-
-    while np.linalg.norm(goal - objectPos) >= 0.01 and timeStep <= env._max_episode_steps :
-        env.render()
-        action = [0, 0, 0, 0]
-        for i in range(len(goal - objectPos)):
-            action[i] = (goal - objectPos)[i]*6
-
-        action[len(action)-1] = -0.005
-
-        obsDataNew, reward, done, info = env.step(action)
-        timeStep += 1
-
-        episodeAcs.append(action)
-        episodeInfo.append(info)
-        episodeObs.append(obsDataNew)
-
-        objectPos = obsDataNew['observation'][3:6]
-        object_rel_pos = obsDataNew['observation'][6:9]
-
-    while True: #limit the number of timesteps in the episode to a fixed duration
-        env.render()
-        action = [0, 0, 0, 0]
-        action[len(action)-1] = -0.005 # keep the gripper closed
-
-        obsDataNew, reward, done, info = env.step(action)
-        timeStep += 1
-
-        episodeAcs.append(action)
-        episodeInfo.append(info)
-        episodeObs.append(obsDataNew)
-
-        objectPos = obsDataNew['observation'][3:6]
-        object_rel_pos = obsDataNew['observation'][6:9]
-
-        if timeStep >= env._max_episode_steps: break
 
     while np.linalg.norm(object_oriented_goal) >= 0.02 and timeStep <= env._max_episode_steps:
         if render: env.render()
@@ -144,7 +69,8 @@ def goToGoal(env, lastObs,numItr):
         for i in range(actiondim): action += [0]
         object_oriented_goal = object_rel_pos.copy()
 
-        action[:3] = object_oriented_goal * 6
+        action[0] = -(object_oriented_goal[1]+object_oriented_goal[2])*3
+        action[1] = (object_oriented_goal[0])*3
         
         action[actiondim-1] = .05 #-(object_oriented_goal[1]+object_oriented_goal[2])*6 #open
 
@@ -154,6 +80,9 @@ def goToGoal(env, lastObs,numItr):
         episodeAcs.append(action)
         episodeInfo.append(info)
         episodeObs.append(obsDataNew)
+        
+        object_rel_pos = obsDataNew['observation'][3:6]
+        commanding_pos = desired_pos - obsDataNew['observation'][6]
         if render: print(env.env.prev_force, env.env.prev_oforce, np.linalg.norm(obsDataNew['achieved_goal'][:3]-obsDataNew['desired_goal'][:3]))
         
 #    print("Actual Grasping force:{}".format(env.env.sim.data.sensordata[env.env.sim.model.sensor_name2id('l_finger_frc')]+env.env.sim.data.sensordata[env.env.sim.model.sensor_name2id('r_finger_frc')]))
@@ -164,7 +93,8 @@ def goToGoal(env, lastObs,numItr):
         for i in range(actiondim): action += [0]
         
         goal_rel_pos = obsDataNew['observation'][7:10]
-        action[:3] = goal_rel_pos * 6.0
+        action[0] = -(goal_rel_pos[1]+goal_rel_pos[2])*3
+        action[1] = (goal_rel_pos[0])*3
 
         action[actiondim-1] = 1
 
@@ -210,4 +140,3 @@ def goToGoal(env, lastObs,numItr):
 
 if __name__ == "__main__":
     main()
-    

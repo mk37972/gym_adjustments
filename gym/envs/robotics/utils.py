@@ -20,13 +20,13 @@ def robot_get_obs(sim):
     return np.zeros(0), np.zeros(0)
 
 
-def ctrl_set_action(sim, action, stiffness_on=False, Chip=True):
+def ctrl_set_action(sim, action, stiffness_on=False, Chip=False):
     """For torque actuators it copies the action into mujoco ctrl field.
     For position actuators it sets the target relative to the current qpos.
     """
-    if sim.model.nmocap > 0 and (Chip == True):
+    if sim.model.nmocap > 0 and (Chip == False):
         _, action = np.split(action, (sim.model.nmocap * 7, ))
-    if sim.data.ctrl is not None and (Chip == True):
+    if sim.data.ctrl is not None and (Chip == False):
         for i in range(action.shape[0]-1):
             if sim.model.actuator_biastype[i] == 0:
                 sim.data.ctrl[i] = action[i]
@@ -52,18 +52,18 @@ def ctrl_set_action(sim, action, stiffness_on=False, Chip=True):
             if i < 2:
                 sim.data.ctrl[i] += action[i]
             else:
-#                if i == 2: print(action[i])
+                # if i == 2: print(action[i])
                 PosDiff = np.min([np.max([sim.data.sensordata[sim.model.sensor_name2id('robot0:Sjp_WRJ2') + i] + action[i], sim.model.actuator_ctrlrange[sim.model.actuator_name2id('robot0:A_WRJ2') + i][0]]), sim.model.actuator_ctrlrange[sim.model.actuator_name2id('robot0:A_WRJ2') + i][1]]) - sim.data.sensordata[sim.model.sensor_name2id('robot0:Sjp_WRJ2') + i]
-#                if i == 2: print("{}: This is the desired actuator position!".format(np.min([np.max([sim.data.sensordata[sim.model.sensor_name2id('robot0:Sjp_WRJ2') + i] + action[i], sim.model.actuator_ctrlrange[sim.model.actuator_name2id('robot0:A_WRJ2') + i][0]]), sim.model.actuator_ctrlrange[sim.model.actuator_name2id('robot0:A_WRJ2') + i][1]])))
-                DesForce = PosDiff * action[-1] if i == action.shape[0]-2 else PosDiff * sim.model.actuator_gainprm[sim.model.actuator_name2id('robot0:A_WRJ2') + i, 0]
+                # if i == 2: print("{}: This is the desired actuator position!".format(np.min([np.max([sim.data.sensordata[sim.model.sensor_name2id('robot0:Sjp_WRJ2') + i] + action[i], sim.model.actuator_ctrlrange[sim.model.actuator_name2id('robot0:A_WRJ2') + i][0]]), sim.model.actuator_ctrlrange[sim.model.actuator_name2id('robot0:A_WRJ2') + i][1]])))
+                DesForce = PosDiff * action[-1]
                 DesForce += sim.data.sensordata[sim.model.sensor_name2id('robot0:Sjp_WRJ2') + i] * sim.model.jnt_stiffness[sim.model.joint_name2id('robot0:WRJ2') + i]
                 CurForce = (sim.data.ctrl[i] - sim.data.sensordata[sim.model.sensor_name2id('robot0:Sjp_WRJ2') + i]) * sim.model.actuator_gainprm[sim.model.actuator_name2id('robot0:A_WRJ2') + i, 0]
-#                if i == 2: print("{}: This is the current actuator position!".format(sim.data.ctrl[i]))
+                # if i == 2: print("{}: This is the current actuator position!".format(sim.data.ctrl[i]))
                 ForceDiff = DesForce - CurForce
                 DesPosDiff = ForceDiff / sim.model.actuator_gainprm[sim.model.actuator_name2id('robot0:A_WRJ2') + i, 0]
                 DesPos = sim.data.ctrl[i] + DesPosDiff
                 sim.data.ctrl[i] = DesPos
-#                if i == 2: print("{}: This is the commanding actuator position!".format(sim.data.ctrl[i]))
+                # if i == 2: print("{}: This is the commanding actuator position!".format(sim.data.ctrl[i]))
 
 
 def mocap_set_action(sim, action):

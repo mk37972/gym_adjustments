@@ -31,9 +31,9 @@ class ActorCritic:
         g = self.g_stats.normalize(self.g_tf)
         input_pi = tf.concat(axis=1, values=[o, g])  # for actor
         
-        weightData = np.load('./hand_dapg/dapg/policies/saved_weights.npz', allow_pickle=True)
-        std = weightData['a_std']
-        mean = weightData['a_mean']
+        # weightData = np.load('./hand_dapg/dapg/policies/saved_weights.npz', allow_pickle=True)
+        # std = weightData['a_std']
+        # mean = weightData['a_mean']
         
         # Networks.
         with tf.variable_scope('pi'):

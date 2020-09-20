@@ -153,13 +153,13 @@ class DDPG(object):
         # action postprocessing
         u = ret[0]
         noise = noise_eps * self.max_u * np.random.randn(*u.shape)  # gaussian noise
-        for noise_comp in noise: 
-            for i in range(8): noise_comp[i] = 0.0 # don't add randomness to the arm and wrist pose
+        # for noise_comp in noise: 
+        #     for i in range(8): noise_comp[i] = 0.0 # don't add randomness to the arm and wrist pose
         u += noise
         u = np.clip(u, -self.max_u, self.max_u)
         random_action = np.random.binomial(1, random_eps, u.shape[0]).reshape(-1, 1) * (self._random_action(u.shape[0]) - u)  # eps-greedy
-        for rand_comp in random_action:
-            for i in range(8): rand_comp[i] = 0.0 # don't add randomness to the arm and wrist pose
+        # for rand_comp in random_action:
+        #     for i in range(8): rand_comp[i] = 0.0 # don't add randomness to the arm and wrist pose
         u += random_action
         if u.shape[0] == 1:
             u = u[0]
@@ -380,7 +380,7 @@ class DDPG(object):
             #define the cloning loss on the actor's actions only on the samples which adhere to the above masks
             self.cloning_loss_tf = tf.reduce_sum(tf.square(tf.boolean_mask(tf.boolean_mask((self.main.pi_tf), mask), maskMain, axis=0) - tf.boolean_mask(tf.boolean_mask((batch_tf['u']), mask), maskMain, axis=0)))
             self.pi_loss_tf = -self.prm_loss_weight * tf.reduce_mean(self.main.Q_pi_tf) #primary loss scaled by it's respective weight prm_loss_weight
-            # self.pi_loss_tf += self.prm_loss_weight * self.action_l2 * tf.reduce_mean(tf.square(self.main.pi_tf / self.max_u)) #L2 loss on action values scaled by the same weight prm_loss_weight
+            self.pi_loss_tf += self.prm_loss_weight * self.action_l2 * tf.reduce_mean(tf.square(self.main.pi_tf / self.max_u)) #L2 loss on action values scaled by the same weight prm_loss_weight
             self.pi_loss_tf += self.aux_loss_weight * self.cloning_loss_tf #* self.w_loss #adding the cloning loss to the actor loss as an auxilliary loss scaled by its weight aux_loss_weight
 
         elif self.bc_loss == 1 and self.q_filter == 0: # train with demonstrations without q_filter
@@ -422,28 +422,28 @@ class DDPG(object):
         tf.variables_initializer(self._global_vars('')).run()
         
         # load weights from pretrained model
-        weightData = np.load('./hand_dapg/dapg/policies/saved_weights.npz', allow_pickle=True)
-        kernel1 = weightData['kernel1']
-        kernel2 = weightData['kernel2']
-        kernel3 = weightData['kernel3']
-        bias1 = weightData['bias1']
-        bias2 = weightData['bias2']
-        bias3 = weightData['bias3']
-        o_mean = weightData['o_mean']
-        o_std = weightData['o_std']
+        # weightData = np.load('./hand_dapg/dapg/policies/saved_weights.npz', allow_pickle=True)
+        # kernel1 = weightData['kernel1']
+        # kernel2 = weightData['kernel2']
+        # kernel3 = weightData['kernel3']
+        # bias1 = weightData['bias1']
+        # bias2 = weightData['bias2']
+        # bias3 = weightData['bias3']
+        # o_mean = weightData['o_mean']
+        # o_std = weightData['o_std']
         
         # print([n.name for n in tf.get_default_graph().as_graph_def().node])
-        k1 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_0/kernel:0')
-        b1 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_0/bias:0')
-        k2 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_1/kernel:0')
-        b2 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_1/bias:0')
-        k3 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_2/kernel:0')
-        b3 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_2/bias:0')
-        o_m = self.sess.graph.get_tensor_by_name('ddpg/o_stats/mean:0')
-        o_s = self.sess.graph.get_tensor_by_name('ddpg/o_stats/std:0')
-        o_sumsq = self.sess.graph.get_tensor_by_name('ddpg/o_stats/sumsq:0')
-        o_sum = self.sess.graph.get_tensor_by_name('ddpg/o_stats/sum:0')
-        o_count = self.sess.graph.get_tensor_by_name('ddpg/o_stats/count:0')
+        # k1 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_0/kernel:0')
+        # b1 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_0/bias:0')
+        # k2 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_1/kernel:0')
+        # b2 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_1/bias:0')
+        # k3 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_2/kernel:0')
+        # b3 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_2/bias:0')
+        # o_m = self.sess.graph.get_tensor_by_name('ddpg/o_stats/mean:0')
+        # o_s = self.sess.graph.get_tensor_by_name('ddpg/o_stats/std:0')
+        # o_sumsq = self.sess.graph.get_tensor_by_name('ddpg/o_stats/sumsq:0')
+        # o_sum = self.sess.graph.get_tensor_by_name('ddpg/o_stats/sum:0')
+        # o_count = self.sess.graph.get_tensor_by_name('ddpg/o_stats/count:0')
         
         # feed the weights and biases, normalization stats
         # self.sess.run(tf.assign(k1,tf.concat([tf.transpose(kernel1, perm=[1,0]), tf.zeros(shape=(9,32))],axis=0)))
@@ -461,7 +461,7 @@ class DDPG(object):
         
         self._sync_optimizers()
         self._init_target_net()
-        writer = tf.summary.FileWriter('./hand_dapg/dapg/policies/graphs', self.sess.graph)
+        # writer = tf.summary.FileWriter('./hand_dapg/dapg/policies/graphs', self.sess.graph)
 
     def logs(self, prefix=''):
         logs = []

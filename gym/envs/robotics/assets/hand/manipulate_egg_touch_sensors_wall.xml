@@ -6,7 +6,7 @@
     </option>
 
     <include file="shared_wall.xml"></include>
-    <!--include file="shared_touch_sensors_92_wall.xml"></include-->
+    <include file="shared_touch_sensors_92_wall.xml"></include>
 
     <asset>
         <include file="shared_asset.xml"></include>
@@ -36,12 +36,12 @@
         <include file="robot_touch_sensors_92_wall.xml"></include>
 
         <body name="object0" pos="1.015 0.77 -0.08" quat="0 0 1 1">
-            <geom name="object" pos="0.04 0.02828427124 0.02828427124" quat="0 0 -0.3826834 0.9238795" type="mesh" mesh="robot0:chip" condim="4" mass="0.1" friction="1 1 0.0001"></geom>
-            <geom name="object_1" pos="0.04 -0.02828427124 -0.02828427124" quat="0.6532815 0.2705981 -0.2705981 0.6532815" type="mesh" mesh="robot0:chip" condim="4" mass="0.1" friction="1 1 0.0001"></geom>
-            <geom name="object_2" pos="-0.04 -0.02828427124 -0.02828427124" quat="0.9238795 0.3826834 0 0" type="mesh" mesh="robot0:chip" condim="4" mass="0.1" friction="1 1 0.0001"></geom>
-            <geom name="object_3" pos="-0.04 0.02828427124 0.02828427124" quat="0.6532815 0.2705981 0.2705981 -0.6532815" type="mesh" mesh="robot0:chip" condim="4" mass="0.1" friction="1 1 0.0001"></geom>
+            <geom name="object" pos="0.04 0.02828427124 0.02828427124" quat="0 0 -0.3826834 0.9238795" type="mesh" mesh="robot0:chip" condim="4" mass="0.1"></geom>
+            <geom name="object_1" pos="0.04 -0.02828427124 -0.02828427124" quat="0.6532815 0.2705981 -0.2705981 0.6532815" type="mesh" mesh="robot0:chip" condim="4" mass="0.1"></geom>
+            <geom name="object_2" pos="-0.04 -0.02828427124 -0.02828427124" quat="0.9238795 0.3826834 0 0" type="mesh" mesh="robot0:chip" condim="4" mass="0.1"></geom>
+            <geom name="object_3" pos="-0.04 0.02828427124 0.02828427124" quat="0.6532815 0.2705981 0.2705981 -0.6532815" type="mesh" mesh="robot0:chip" condim="4" mass="0.1"></geom>
             <site name="object0" pos="0 0 0" rgba="1 0 0 0" size="0.01 0.01 0.01"></site>
-            <site name="objectfrc" type="cylinder" pos="0 -0.008 0.008" quat="0 0 -0.3826834 0.9238795" rgba="1 0 0 0" size="0.041 0.0120"></site>
+            <site name="objectfrc" type="cylinder" pos="0 -0.015 0.015" quat="0 0 -0.3826834 0.9238795" rgba="1 0 0 0" size="0.041 0.0225"></site>
             <freejoint name="object0:joint" />
         </body>
         <body name="target" pos="1 0.87 0.2">

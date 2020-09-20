@@ -29,10 +29,10 @@
     </default>
     
     <contact>
-        <pair geom1="robot0:C_ffdistal" geom2="object" condim="4" friction="2 2"/>
-        <pair geom1="robot0:C_ffdistal" geom2="object_1" condim="4" friction="2 2"/>
-        <pair geom1="robot0:C_ffdistal" geom2="object_2" condim="4" friction="2 2"/>
-        <pair geom1="robot0:C_ffdistal" geom2="object_3" condim="4" friction="2 2"/>
+        <pair geom1="robot0:C_ffdistal" geom2="object" condim="6" />
+        <pair geom1="robot0:C_ffdistal" geom2="object_1" condim="6" />
+        <pair geom1="robot0:C_ffdistal" geom2="object_2" condim="6" />
+        <pair geom1="robot0:C_ffdistal" geom2="object_3" condim="6"/>
         <!--pair geom1="wall0" geom2="object" condim="3" friction="3 1 0.5 0.0001 0.0001"/-->
         <pair geom1="wall1" geom2="object" condim="4" friction="0.3 0.3"/>
         <pair geom1="wall1" geom2="object_1" condim="4" friction="0.3 0.3"/>
@@ -50,8 +50,8 @@
     </sensor>
 
     <actuator>
-        <position name="robot0:A_WRJ2" class="robot0:asset_class" user="2040" joint="robot0:WRJ2" ctrlrange="-0.5 0.5" kp="1000"></position>
-        <position name="robot0:A_WRJ1" class="robot0:asset_class" user="2038" joint="robot0:WRJ1" ctrlrange="-0.5 0.5" kp="1000"></position>
+        <position name="robot0:A_WRJ2" class="robot0:asset_class" user="2040" joint="robot0:WRJ2" ctrlrange="-0.5 0.5" kp="500"></position>
+        <position name="robot0:A_WRJ1" class="robot0:asset_class" user="2038" joint="robot0:WRJ1" ctrlrange="-0.5 0.5" kp="500"></position>
         <position name="robot0:A_WRJ0" class="robot0:asset_class" user="2036" joint="robot0:WRJ0" ctrlrange="-1 1" kp="50"></position>
     </actuator>
 </mujoco>
