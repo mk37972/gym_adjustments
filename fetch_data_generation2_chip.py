@@ -7,7 +7,7 @@ import numpy as np
 actions = []
 observations = []
 infos = []
-render = 1
+render = 0
 
 def main():
     env = gym.make('FetchPickAndPlaceFragile-v2')
@@ -23,7 +23,7 @@ def main():
         goToGoal(env, obs,numItr)
     
     for i in [3,4,5]:
-        fileName = "data_chip"
+        fileName = "data_chip_vel"
         fileName += "_" + initStateSpace
         fileName += "_" + str(numItr)
         fileName += "_bad{}dim".format(i)

@@ -421,7 +421,7 @@ class DDPG(object):
         # initialize all variables
         tf.variables_initializer(self._global_vars('')).run()
         
-        # load weights from pretrained model
+        # # load weights from pretrained model
         # weightData = np.load('./hand_dapg/dapg/policies/saved_weights.npz', allow_pickle=True)
         # kernel1 = weightData['kernel1']
         # kernel2 = weightData['kernel2']
@@ -432,7 +432,7 @@ class DDPG(object):
         # o_mean = weightData['o_mean']
         # o_std = weightData['o_std']
         
-        # print([n.name for n in tf.get_default_graph().as_graph_def().node])
+        # # print([n.name for n in tf.get_default_graph().as_graph_def().node])
         # k1 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_0/kernel:0')
         # b1 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_0/bias:0')
         # k2 = self.sess.graph.get_tensor_by_name('ddpg/main/pi/_1/kernel:0')
@@ -445,7 +445,7 @@ class DDPG(object):
         # o_sum = self.sess.graph.get_tensor_by_name('ddpg/o_stats/sum:0')
         # o_count = self.sess.graph.get_tensor_by_name('ddpg/o_stats/count:0')
         
-        # feed the weights and biases, normalization stats
+        # # feed the weights and biases, normalization stats
         # self.sess.run(tf.assign(k1,tf.concat([tf.transpose(kernel1, perm=[1,0]), tf.zeros(shape=(9,32))],axis=0)))
         # self.sess.run(tf.assign(k2,tf.transpose(kernel2, perm=[1,0])))
         # self.sess.run(tf.assign(k3,tf.transpose(kernel3, perm=[1,0])))

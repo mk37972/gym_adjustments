@@ -41,7 +41,7 @@ class FetchEnv(robot_env.RobotEnv):
         self.target_offset = target_offset
         self.obj_range = obj_range
         self.target_range = target_range
-        self.distance_threshold = distance_threshold
+        self.distance_threshold = 0.05
         self.reward_type = reward_type
         self.fragile_on = fragile_on
         self.stiffness_on = stiffness_on
@@ -298,9 +298,9 @@ class FetchEnv(robot_env.RobotEnv):
                 #     self.broken_object = 0.0
                     
                 obs = np.concatenate([
-                    grip_pos, object_rel_pos.ravel(), [robot_qpos[2]], goal_rel_pos.ravel(), object_velp, conc_stiffness_data
+                    grip_pos, object_rel_pos.ravel(), [robot_qpos[2]], goal_rel_pos.ravel(), grip_velp, conc_stiffness_data
                 ])
-                achieved_goal = np.concatenate([achieved_goal, object_velp, conc_stiffness_data[:1]])
+                achieved_goal = np.concatenate([achieved_goal, grip_velp*5.0, conc_stiffness_data[:1]])
                 
                 self.prev_force = finger_force
                 self.prev_oforce = object_force
@@ -364,7 +364,7 @@ class FetchEnv(robot_env.RobotEnv):
         if self.has_object and self.model_path.find('wall') == -1:
             object_xpos = self.initial_gripper_xpos[:2]
             while np.linalg.norm(object_xpos - self.initial_gripper_xpos[:2]) < 0.1:
-                object_xpos = self.initial_gripper_xpos[:2] + self.np_random.uniform(-self.obj_range, self.obj_range, size=2)
+                object_xpos = self.initial_gripper_xpos[:2] + self.np_random.uniform(-self.obj_range, self.obj_range, size=2)#*np.array([1,0.3])
             object_qpos = self.sim.data.get_joint_qpos('object0:joint')
             assert object_qpos.shape == (7,)
             object_qpos[:2] = object_xpos
@@ -392,7 +392,7 @@ class FetchEnv(robot_env.RobotEnv):
             goal = self.initial_gripper_xpos[:3] + self.np_random.uniform(-self.target_range, self.target_range, size=3)
             goal += self.target_offset
             goal[2] = self.height_offset
-            if self.target_in_the_air and self.np_random.uniform() < 0.5:
+            if self.target_in_the_air:# and self.np_random.uniform() < 0.5:
                 goal[2] += self.np_random.uniform(0, 0.45)
         elif self.has_object:
             offset = np.array([0.45*np.random.random()-0.24, 0.30*np.random.random(), 0.0])

@@ -265,23 +265,15 @@ def main(args):
                 actions, _, _, _ = model.step(obs)
                 
             distance = np.linalg.norm(obs['achieved_goal'][0][:3] - obs['desired_goal'][0][:3])
-            # force = -np.sum((obs['achieved_goal'][0][3:]))*100.0
-            force = env.envs[0].env.prev_oforce
-            print(force, env.envs[0].env.object_fragility, force>env.envs[0].env.object_fragility)
-            print(obs['observation'][0][11:13] ,actions)
-#            tmpObs = dict(observation = np.concatenate([obs['observation'][0], [np.float32(0.25)]]),
-#                          achieved_goal = obs['achieved_goal'][0],
-#                          desired_goal = obs['desired_goal'][0])
-#            tmpAcs = np.concatenate([actions, [np.float32(0.0)]])
-#                
-#            episodeAct.append(tmpAcs)
-#            episodeObs.append(tmpObs)
+            force = - env.envs[0].env.prev_lforce - env.envs[0].env.prev_rforce
+            # print(force, env.envs[0].env.object_fragility, force>env.envs[0].env.object_fragility)
+            # print(obs['observation'][0][11:13] ,actions)
             
             obs, rew, done, info = env.step(actions)
             episodeInfo.append(info[0])
             episode_rew += rew
             # if args.filename is None: env.render()
-            env.render()
+            # env.render()
             done_any = done.any() if isinstance(done, np.ndarray) else done
             
             

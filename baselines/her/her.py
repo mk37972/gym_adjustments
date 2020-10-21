@@ -58,8 +58,8 @@ def train(*, policy, rollout_worker, evaluator,
         for key, val in evaluator.logs('test'):
             avg = mpi_average(val)
             logger.record_tabular(key, avg)
-            # if key == 'test/success_rate3':
-            #     if avg > 0.90: policy.remove_demo = 1
+            if key == 'test/success_rate3':
+                if avg > 0.90: policy.remove_demo = 1
         for key, val in rollout_worker.logs('train'):
             avg = mpi_average(val)
             logger.record_tabular(key, avg)

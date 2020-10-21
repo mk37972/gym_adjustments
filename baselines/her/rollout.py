@@ -85,10 +85,11 @@ class RolloutWorker:
                 Qs.append(Q)
                 # Fs.append(np.abs(np.float32((o[:,11:13] * (o[:,11:13] < 0.0)).sum(axis=-1))).mean())
                 # Fs.append(np.abs(np.float32(o[:,13] * (o[:,13] > 0.0))).mean())
+                # if np.abs(np.float32([e.env.prev_oforce for e in self.venv.envs])).mean() > 5.0: 
                 Fs.append(np.abs(np.float32([e.env.prev_oforce for e in self.venv.envs])).mean())
-                Ks.append(np.abs(np.float32(o[:,13].sum(axis=-1))).mean())
+                # Ks.append(np.abs(np.float32(o[:,13].sum(axis=-1))).mean())
                 # Ks.append(0.5)
-                # Ks.append(np.abs(np.float32(o[:,14].sum(axis=-1))).mean())
+                Ks.append(np.abs(np.float32(o[:,14].sum(axis=-1))).mean())
             else:
                 u = policy_output
             if u.ndim == 1:
@@ -108,7 +109,6 @@ class RolloutWorker:
             ag_new = obs_dict_new['achieved_goal']
             success = np.array([i.get('is_success', 0.0) for i in info])
             # success2 = (np.float32(o[:,11:13].sum(axis=-1))*1000.0 > -147.15/3*6)
-            # success2 = (np.float32(o[:,10])*100.0 > -40)
             success2 = (np.float32(self.venv.envs[0].env.prev_oforce < self.venv.envs[0].env.object_fragility))
             
 #            success2 = np.float32(o[:,13] == 0.0)

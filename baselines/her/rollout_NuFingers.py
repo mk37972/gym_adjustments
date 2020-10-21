@@ -1,0 +1,255 @@
+from collections import deque
+
+import numpy as np
+import pickle
+
+from baselines.her.util import convert_episode_to_batch_major, store_args
+
+from nifpga import Session
+import time
+import click
+
+R_j = np.matrix([[0.01575,0],
+                  [0.01575, 0.01575]])
+R_j_inv = np.linalg.inv(R_j)
+R_e = np.matrix([[0.0034597,0],
+                  [0, 0.0034597]])
+
+class RolloutWorker:
+
+    @store_args
+    def __init__(self, venv, policy, dims, logger, T, rollout_batch_size=1,
+                 exploit=False, use_target_net=False, compute_Q=False, noise_eps=0,
+                 random_eps=0, history_len=100, render=False, monitor=False, **kwargs):
+        """Rollout worker generates experience by interacting with one or many environments.
+
+        Args:
+            venv: vectorized gym environments.
+            policy (object): the policy that is used to act
+            dims (dict of ints): the dimensions for observations (o), goals (g), and actions (u)
+            logger (object): the logger that is used by the rollout worker
+            rollout_batch_size (int): the number of parallel rollouts that should be used
+            exploit (boolean): whether or not to exploit, i.e. to act optimally according to the
+                current policy without any exploration
+            use_target_net (boolean): whether or not to use the target net for rollouts
+            compute_Q (boolean): whether or not to compute the Q values alongside the actions
+            noise_eps (float): scale of the additive Gaussian noise
+            random_eps (float): probability of selecting a completely random action
+            history_len (int): length of history for statistics smoothing
+            render (boolean): whether or not to render the rollouts
+        """
+
+        assert self.T > 0
+
+        self.info_keys = [key.replace('info_', '') for key in dims.keys() if key.startswith('info_')]
+
+        self.success_history = deque(maxlen=history_len)
+        self.success_history2 = deque(maxlen=history_len)
+        self.success_history3 = deque(maxlen=history_len)
+        self.Q_history = deque(maxlen=history_len)
+        self.F_history = deque(maxlen=history_len)
+        self.K_history = deque(maxlen=history_len)
+
+        self.n_episodes = 0
+        self.reset_all_rollouts()
+        self.clear_history()
+
+    def reset_all_rollouts(self):
+        self.obs_dict = self.venv.reset()
+        self.initial_o = self.obs_dict['observation']
+        self.initial_ag = self.obs_dict['achieved_goal']
+        self.g = self.obs_dict['desired_goal']
+
+    def generate_rollouts(self):
+        """Performs `rollout_batch_size` rollouts in parallel for time horizon `T` with the current
+        policy acting on it accordingly.
+        """
+        self.reset_all_rollouts()
+
+        # compute observations
+        o = np.empty((self.rollout_batch_size, self.dims['o']), np.float32)  # observations
+        ag = np.empty((self.rollout_batch_size, self.dims['g']), np.float32)  # achieved goals
+        o[:] = self.initial_o
+        ag[:] = self.initial_ag
+
+        # generate episodes
+        obs, achieved_goals, acts, goals, successes, successes2, successes3 = [], [], [], [], [], [], []
+        dones = []
+        info_values = [np.empty((self.T - 1, self.rollout_batch_size, self.dims['info_' + key]), np.float32) for key in self.info_keys]
+        Qs = []
+        Fs = []
+        Ks = []
+        
+        with Session(bitfile="SCPC-lv-noFIFO_FPGATarget_FPGAmainepos_1XvgQEcJVeE.lvbitx", resource="rio://10.157.23.150/RIO0") as session:
+            act_Rj1=session.registers['Mod3/AO0']
+            enc_Rj1=session.registers['Rj1']
+            act_Rj2=session.registers['Mod3/AO1']
+            enc_Rj2=session.registers['Rj2']
+            
+            act_Lj1=session.registers['Mod3/AO3']
+            enc_Lj1=session.registers['Lj1']
+            act_Lj2=session.registers['Mod3/AO4']
+            enc_Lj2=session.registers['Lj2']
+            
+            sen_f=session.registers['fsensor']
+            
+            for i in range(1000):
+                Re1 = enc_Rj1.read()
+                Re2 = enc_Rj2.read()
+                Le1 = enc_Lj1.read()
+                Le2 = enc_Lj2.read()
+                
+                f_sensor = 5.1203 * sen_f.read() - 5.2506
+                
+                Rj = R_j_inv * R_e * np.array([[Re1],[Re2]]) * np.pi/180.0
+                Lj = R_j_inv * R_e * np.array([[Le1],[Le2]]) * np.pi/180.0
+                
+                act_Rj2.write(3*np.sin(data[i]))
+                act_Lj2.write(3*np.sin(data[i]))
+                # print("Right Finger, 1st:{}, 2nd:{},".format(Rj[0,0]*180/np.pi,Rj[1,0]*180/np.pi))
+                # print("Left Finger, 1st:{}, 2nd:{},".format(Lj[0,0]*180/np.pi,Lj[1,0]*180/np.pi))
+                time.sleep(0.001)
+            for t in range(self.T):
+                policy_output = self.policy.get_actions(
+                    o, ag, self.g,
+                    compute_Q=self.compute_Q,
+                    noise_eps=self.noise_eps if not self.exploit else 0.,
+                    random_eps=self.random_eps if not self.exploit else 0.,
+                    use_target_net=self.use_target_net)
+    
+                
+    
+                if self.compute_Q:
+                    u, Q = policy_output
+                    Qs.append(Q)
+                    # Fs.append(np.abs(np.float32((o[:,11:13] * (o[:,11:13] < 0.0)).sum(axis=-1))).mean())
+                    # Fs.append(np.abs(np.float32(o[:,13] * (o[:,13] > 0.0))).mean())
+                    # if np.abs(np.float32([e.env.prev_oforce for e in self.venv.envs])).mean() > 5.0: 
+                    Fs.append(np.abs(np.float32([e.env.prev_oforce for e in self.venv.envs])).mean())
+                    # Ks.append(np.abs(np.float32(o[:,13].sum(axis=-1))).mean())
+                    # Ks.append(0.5)
+                    Ks.append(np.abs(np.float32(o[:,14].sum(axis=-1))).mean())
+                else:
+                    u = policy_output
+                if u.ndim == 1:
+                    # The non-batched case should still have a reasonable shape.
+                    u = u.reshape(1, -1)
+    
+                o_new = np.empty((self.rollout_batch_size, self.dims['o']))
+                ag_new = np.empty((self.rollout_batch_size, self.dims['g']))
+                success = np.zeros(self.rollout_batch_size)
+                success2 = np.zeros(self.rollout_batch_size)
+                
+                # success3 = np.zeros(self.rollout_batch_size)
+                # compute new states and observations
+                obs_dict_new, _, done, info = self.venv.step(u)
+                # self.venv.render()
+                o_new = obs_dict_new['observation']
+                ag_new = obs_dict_new['achieved_goal']
+                success = np.array([i.get('is_success', 0.0) for i in info])
+                # success2 = (np.float32(o[:,11:13].sum(axis=-1))*1000.0 > -147.15/3*6)
+                success2 = (np.float32(self.venv.envs[0].env.prev_oforce < self.venv.envs[0].env.object_fragility))
+                
+    #            success2 = np.float32(o[:,13] == 0.0)
+    
+                # success2 = (np.linalg.norm(o[:,-9:-6],axis=-1)) < 0.05
+                # success3 = (np.linalg.norm(o[:,-6:-3],axis=-1)) < 0.05
+                
+    #            print(o_new[0,-4:])
+    
+                if any(done):
+                    # here we assume all environments are done is ~same number of steps, so we terminate rollouts whenever any of the envs returns done
+                    # trick with using vecenvs is not to add the obs from the environments that are "done", because those are already observations
+                    # after a reset
+                    break
+    
+                for i, info_dict in enumerate(info):
+                    for idx, key in enumerate(self.info_keys):
+                        info_values[idx][t, i] = info[i][key]
+    
+                if np.isnan(o_new).any():
+                    self.logger.warn('NaN caught during rollout generation. Trying again...')
+                    self.reset_all_rollouts()
+                    return self.generate_rollouts()
+    
+                dones.append(done)
+                obs.append(o.copy())
+                achieved_goals.append(ag.copy())
+                successes.append(success.copy())
+                successes2.append(success2.copy())
+                
+                # successes3.append(success3.copy())
+                acts.append(u.copy())
+                goals.append(self.g.copy())
+                o[...] = o_new
+                ag[...] = ag_new
+    #        print("--------------------New Rollout--------------------")
+            obs.append(o.copy())
+            achieved_goals.append(ag.copy())
+    
+            episode = dict(o=obs,
+                           u=acts,
+                           g=goals,
+                           ag=achieved_goals)
+            for key, value in zip(self.info_keys, info_values):
+                episode['info_{}'.format(key)] = value
+    
+            # stats
+            successful = np.array(successes)[-1, :]
+            successful2 = np.array(successes2)
+            # successful3 = np.array(successes3)
+    #        successful2 = np.array(successes2)[-1, :]
+            assert successful.shape == (self.rollout_batch_size,)
+            success_rate = np.mean(successful)
+            success_rate2 = np.mean(successful2.mean(axis=0))
+            # success_rate3 = np.mean(successful3.mean(axis=0))
+            success_rate3 = np.mean(successful2.min(axis=0) * successful)
+            self.success_history.append(success_rate)
+            self.success_history2.append(success_rate2)
+            self.success_history3.append(success_rate3)
+            if self.compute_Q:
+                self.Q_history.append(np.mean(Qs))
+                self.F_history.append(np.mean(Fs))
+                self.K_history.append(np.mean(Ks))
+            self.n_episodes += self.rollout_batch_size
+
+        return convert_episode_to_batch_major(episode)
+
+    def clear_history(self):
+        """Clears all histories that are used for statistics
+        """
+        self.success_history.clear()
+        self.Q_history.clear()
+        self.F_history.clear()
+        self.K_history.clear()
+
+    def current_success_rate(self):
+        return np.mean(self.success_history)
+
+    def current_mean_Q(self):
+        return np.mean(self.Q_history)
+
+    def save_policy(self, path):
+        """Pickles the current policy for later inspection.
+        """
+        with open(path, 'wb') as f:
+            pickle.dump(self.policy, f)
+
+    def logs(self, prefix='worker'):
+        """Generates a dictionary that contains all collected statistics.
+        """
+        logs = []
+        logs += [('success_rate', np.mean(self.success_history))]
+        if self.compute_Q:
+            logs += [('mean_Q', np.mean(self.Q_history))]
+            logs += [('mean_F', np.mean(self.F_history))]
+            logs += [('mean_K', np.mean(self.K_history))]
+        logs += [('success_rate2', np.mean(self.success_history2))]
+        logs += [('success_rate3', np.mean(self.success_history3))]
+        logs += [('episode', self.n_episodes)]
+
+        if prefix != '' and not prefix.endswith('/'):
+            return [(prefix + '/' + key, val) for key, val in logs]
+        else:
+            return logs
+
