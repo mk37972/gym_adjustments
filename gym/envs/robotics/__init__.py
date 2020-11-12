@@ -15,3 +15,5 @@ from gym.envs.robotics.hand.manipulate_touch_sensors import HandBlockTouchSensor
 from gym.envs.robotics.hand.manipulate_touch_sensors import HandEggTouchSensorsEnv
 from gym.envs.robotics.hand.manipulate_touch_sensors import HandWallTouchSensorsEnv
 from gym.envs.robotics.hand.manipulate_touch_sensors import HandPenTouchSensorsEnv
+
+from gym.envs.robotics.fetch.NuFingers_rotate import NuFingersRotateEnv

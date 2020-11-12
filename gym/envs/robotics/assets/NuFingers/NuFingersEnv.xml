@@ -1,6 +1,7 @@
 <mujoco model="NuFinger+">
     <compiler angle="radian" meshdir="./" />
-    <size njmax="500" nconmax="100" />
+    <option timestep = "0.00075"/>
+    <size njmax="500" nconmax="1000" />
     <asset>
         <material name="table_mat" specular="0" shininess="0.5" reflectance="0" rgba="0.93 0.93 0.93 1"></material>
         
@@ -10,10 +11,15 @@
         <mesh name="base_link_R" file="base_link_R.STL" />
         <mesh name="Link_1_R" file="Link_1_R.STL" />
         <mesh name="Link_2_R" file="Link_2_R.STL" />
-        <mesh name="Sensor_base" file="Sensor_base.STL" />
-        <mesh name="Sensor_middle" file="Sensor_middle.STL" />
+        <mesh name="Sensor_base_v1" file="Sensor_base_v1.STL" />
+        <mesh name="Sensor_link_v1" file="Sensor_link_v1.STL" />
+        <mesh name="Sensor_base_v2" file="Sensor_base_v2.STL" />
+        <mesh name="Sensor_link_v2" file="Sensor_link_v2.STL" />
     </asset>
     <worldbody>
+        <body name="target_body" pos="-0.0397 0 0.06" quat="0.7071 0 -0.7071 0">
+            <site name="target0"  size="0.002 0.018" rgba="1 0 0 1" quat="1 0 0 0" type="cylinder"/>
+        </body>
     
 	    <light directional="true" ambient="0.2 0.2 0.2" diffuse="0.8 0.8 0.8" specular="0.3 0.3 0.3" castshadow="false" pos="0 0 4" dir="0 0 -1" name="light0"/>
 	    <geom name='ground' size="0.125 0.125 0.00625" pos="0 0 -0.00625" type="box" contype="1" conaffinity="0" material="table_mat"/>
@@ -26,14 +32,17 @@
 		    <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.37255 0.38824 0.43922 1" mesh="base_link_L" />
 		    <body name="Link_1_L" pos="-0.0127 -0.0381 0.043409" quat="0.499998 0.5 -0.5 0.500002">
 		        <inertial pos="-0.0018657 0.041762 -9.687e-08" quat="0.706892 0.706891 0.0174838 0.0174101" mass="0.096446" diaginertia="0.000112274 0.00010696 8.04875e-06" />
-		        <joint name="Joint_1_L" pos="0 0 0" axis="1 0 0" limited="true" range="-1 1" damping="5e-3" armature="1e-5"/>
-		        <joint name="FakeJoint_1_L" pos="0 0 0" axis="1 0 0" limited="true" damping="5e-3" range="-1e-2 1e-2"/>
+		        <joint name="FakeJoint_1_L2" pos="0 0 0" axis="-1 0 0" limited="true" range="-1e-6 1e-6" armature="1e-5" damping="2e-2"/>
+		        <joint name="Joint_1_L" pos="0 0 0" axis="1 0 0" limited="true" range="-1.5 1.5" damping="1e-1" armature="1e0"/>
+		        <joint name="FakeJoint_1_L" pos="0 0 0" axis="1 0 0" limited="true" damping="2e-2" range="-1e-6 1e-6" armature="1e-5"/>
 		        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.37255 0.38824 0.43922 1" mesh="Link_1_L" />
-		        <body name="Link_2_L" pos="-0.0087376 0.1 0" quat="1.34924e-11 -3.67321e-06 -1 3.67321e-06">
+		        <body name="Link_2_L" pos="-0.0087376 0.1 0" quat=" 0.0002956 -0.0000209 0.9975159 0.0704416">
 		            <inertial pos="-0.015421 0.018373 0.0010459" quat="0.697669 0.71524 -0.0333357 -0.0240372" mass="0.074035" diaginertia="3.394e-05 2.99498e-05 5.94866e-06" />
-		            <joint name="Joint_2_L" pos="0 0 0" axis="1 0 0" limited="true" range="-2 2" damping="1e-2" armature="1e-5"/>
-        		        <joint name="FakeJoint_2_L" pos="0 0 0" axis="1 0 0" limited="true" damping="1e-2" range="-1e-2 1e-2"/>
-		            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.37255 0.38824 0.43922 1" mesh="Link_2_L" />
+    		        <joint name="FakeJoint_2_L2" pos="0 0 0" axis="1 0 0" limited="true" damping="2e-2" range="-1e-6 1e-6" armature="1e-5"/>
+		            <joint name="Joint_2_L" pos="0 0 0" axis="-1 0 0" limited="true" range="-2.5 2.5" damping="1e0" armature="1e0"/>    
+    		        <joint name="FakeJoint_2_L" pos="0 0 0" axis="1 0 0" limited="true" damping="2e-2" range="-1e-6 1e-6" armature="1e-5"/>
+    		        <site name="Left_fingertip" type="sphere" size="0.0075" pos="0 0.07426 0.01054" group="1"/>
+		            <geom type="mesh" contype="1" conaffinity="1" group="1" rgba="0.37255 0.38824 0.43922 1" mesh="Link_2_L" />
 		        </body>
 		    </body>
 	    </body>
@@ -43,41 +52,50 @@
 		    <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.37255 0.38824 0.43922 1" mesh="base_link_R" />
 		    <body name="Link_1_R" pos="-0.0127 -0.0381 0.043409" quat="0.499998 0.5 -0.5 0.500002">
                 <inertial pos="-0.0018657 0.041762 -9.687e-08" quat="0.706892 0.706891 0.0174838 0.0174101" mass="0.096446" diaginertia="0.000112274 0.00010696 8.04875e-06" />
-                <joint name="Joint_1_R" pos="0 0 0" axis="1 0 0" limited="true" range="-1 1" damping="5e-3"  armature="1e-5"/>
-		       <joint name="FakeJoint_1_R" pos="0 0 0" axis="1 0 0" limited="true" damping="5e-3" range="-1e-2 1e-2"/>
+                <joint name="FakeJoint_1_R2" pos="0 0 0" axis="-1 0 0" limited="true" range="-1e-6 1e-6" armature="1e-5" damping="2e-2"/>
+                <joint name="Joint_1_R" pos="0 0 0" axis="1 0 0" limited="true" range="-1.5 1.5" damping="1e-1"  armature="1e0"/>
+                <joint name="FakeJoint_1_R" pos="0 0 0" axis="1 0 0" limited="true" range="-1e-6 1e-6" armature="1e-5" damping="2e-2"/>
 		       <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.37255 0.38824 0.43922 1" mesh="Link_1_R" />
-                <body name="Link_2_R" pos="-0.0087376 0.1 0" quat="1.34924e-11 -3.67321e-06 -1 3.67321e-06">
+                <body name="Link_2_R" pos="-0.0087376 0.1 0" quat="0.0002956 0.0000209 0.9975159 -0.0704416">
                     <inertial pos="-0.015421 0.018359 -0.0010318" quat="0.715245 0.697665 -0.0241332 -0.0332553" mass="0.074035" diaginertia="3.39401e-05 2.99499e-05 5.94834e-06" />
-                    <joint name="Joint_2_R" pos="0 0 0" axis="1 0 0" limited="true" range="-2 2" damping="1e-2"  armature="1e-5"/>
-        		       <joint name="FakeJoint_2_R" pos="0 0 0" axis="1 0 0" limited="true" damping="1e-2" range="-1e-2 1e-2"/>
-		           <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.37255 0.38824 0.43922 1" mesh="Link_2_R" />
+                    <joint name="FakeJoint_2_R2" pos="0 0 0" axis="-1 0 0" limited="true" range="-1e-6 1e-6" armature="1e-5" damping="2e-2"/>
+                    <joint name="Joint_2_R" pos="0 0 0" axis="1 0 0" limited="true" range="-2.5 2.5" damping="1e0"  armature="1e-0"/>
+                    <joint name="FakeJoint_2_R" pos="0 0 0" axis="1 0 0" limited="true" range="-1e-6 1e-6" armature="1e-5" damping="2e-2"/>
+        		    <site name="Right_fingertip" type="sphere" size="0.0075" pos="0 0.07426 -0.01054" group="1"/>
+		           <geom type="mesh" contype="1" conaffinity="1" group="1" rgba="0.37255 0.38824 0.43922 1" mesh="Link_2_R" />
 		        </body>
 		    </body>
 	    </body>
 	    
-	    <body name="Sensor_base" pos="-0.0524 0 0" quat="-0.5 -0.5 0.5 0.5">
-		    <inertial pos="-1.787E-06 0.020969 -0.00023519" mass="0.053699" diaginertia="3.0243E-06 3.6065E-06 5.9611E-06" />
-		    <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.8 0.93 0.93 1" mesh="Sensor_base" />
+	    <body name="Sensor_base" pos="-0.0397 0 0" quat="-0.5 -0.5 0.5 0.5">
+		    <inertial pos="1.5853E-17 -0.013714 6.4393E-17" mass="0.029031" diaginertia="1.9907E-06 3.717E-06 2.5789E-06" />
+		    <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.8 0.93 0.93 1" mesh="Sensor_base_v1" />
             <site name="spring_origin_L" size="0.002" type="sphere" pos="0.0216 0.0120 0" rgba="1 1 1 1" group="4"/>
             <site name="spring_origin_R" size="0.002" type="sphere" pos="-0.0216 0.0120 0" rgba="1 1 1 1" group="4"/>
-            <body name="Sensor_middle" pos="0 0 0">
-                <inertial pos="-4.5754e-06 0.035178 -0.00034553" quat="0.501157 0.498952 0.496494 0.503371" mass="0.083993" diaginertia="3.22103e-05 1.98158e-05 1.86579e-05" />
-                <joint name="Sensor_joint" pos="0 0 0" axis="0 -1 0" damping="1e-4"/>
-                <site name="spring_end_L" size="0.002" type="sphere" pos="0.03335 0.0120 0" rgba="1 1 1 1" group="4"/>
-                <site name="spring_end_R" size="0.002" type="sphere" pos="-0.03335 0.0120 0" rgba="1 1 1 1" group="4"/>
-                <geom type="mesh" rgba="0.8 0.93 0.93 1" mesh="Sensor_middle" />
+            <body name="Sensor_middle" pos="0 0 0" quat="1 -1 1 1">
+                <inertial pos="0.00062602 -1.7702e-06 -0.0078616" quat="-0.000341738 0.710612 0.00039 0.703584" mass="0.059025" diaginertia="9.41143e-06 6.3238e-06 5.06847e-06" />
+                <joint name="Sensor_joint" pos="0 0 0" axis="0 0 1" damping="1e-4"/>
+                <site name="spring_end_L" size="0.002" type="sphere" pos="0.02 0 0.015" rgba="1 1 1 1" group="4"/>
+                <site name="spring_end_R" size="0.002" type="sphere" pos="0.02 0 0.015" rgba="1 1 1 1" group="4"/>
+                <geom type="mesh" rgba="0.8 0.93 0.93 1" mesh="Sensor_link_v2" group="1"/>
             </body>
         </body>
+        
+        
     </worldbody>
     
     <actuator>
-        <position name='AJ1_L' kp="1e2" tendon="T1_L" ctrllimited="true" ctrlrange="-10 10" gear="0.0285 0 0 0 0 0"/>
-        <position name='AJ2_L' kp="1e2" tendon="T2_L" ctrllimited="true" ctrlrange="-10 10" gear="0.0285 0 0 0 0 0"/>
-        <position name='AJ1_R' kp="1e2" tendon="T1_R" ctrllimited="true" ctrlrange="-10 10" gear="0.0285 0 0 0 0 0"/>
-        <position name='AJ2_R' kp="1e2" tendon="T2_R" ctrllimited="true" ctrlrange="-10 10" gear="0.0285 0 0 0 0 0"/>
+        <position name='AJ1_L' kp="1e3" tendon="T1_L" ctrllimited="true" ctrlrange="-3 3" gear="35.087719298 0 0 0 0 0"/>
+        <position name='AJ2_L' kp="1e3" tendon="T2_L" ctrllimited="true" ctrlrange="-3 3" gear="35.087719298 0 0 0 0 0"/>
+        <position name='AJ1_R' kp="1e3" tendon="T1_R" ctrllimited="true" ctrlrange="-3 3" gear="35.087719298 0 0 0 0 0"/>
+        <position name='AJ2_R' kp="1e3" tendon="T2_R" ctrllimited="true" ctrlrange="-3 3" gear="35.087719298 0 0 0 0 0"/>
     </actuator>
     
     <equality>
+        <joint joint1="Joint_1_L" joint2="FakeJoint_1_L2" polycoef="0 1 0 0 0"/>
+        <joint joint1="Joint_2_L" joint2="FakeJoint_2_L2" polycoef="0 1 0 0 0"/>
+        <joint joint1="Joint_1_R" joint2="FakeJoint_1_R2" polycoef="0 1 0 0 0"/>
+        <joint joint1="Joint_2_R" joint2="FakeJoint_2_R2" polycoef="0 1 0 0 0"/>
     </equality>
     
     <tendon>
@@ -90,19 +108,19 @@
             <site site="spring_end_R"/>
         </spatial>
     
-        <fixed name="T1_L" stiffness="720">
-            <joint joint="Joint_1_L" coef="-0.015875"/>
+        <fixed name="T1_L" stiffness="1400" frictionloss= "5e3">
+            <joint joint="Joint_1_L" coef="0.01575"/>
         </fixed>
-        <fixed name="T2_L" stiffness="720">
-            <joint joint="Joint_1_L" coef="-0.015875"/>
-            <joint joint="Joint_2_L" coef="0.015875"/>
+        <fixed name="T2_L" stiffness="1400" frictionloss= "8e3">
+            <joint joint="Joint_1_L" coef="0.01575"/>
+            <joint joint="Joint_2_L" coef="0.01575"/>
         </fixed>
-        <fixed name="T1_R" stiffness="720">
-            <joint joint="Joint_1_R" coef="0.015875"/>
+        <fixed name="T1_R" stiffness="1400" frictionloss= "5e3">
+            <joint joint="Joint_1_R" coef="0.01575"/>
         </fixed>
-        <fixed name="T2_R" stiffness="720">
-            <joint joint="Joint_1_R" coef="-0.015875"/>
-            <joint joint="Joint_2_R" coef="0.015875"/>
+        <fixed name="T2_R" stiffness="1400" frictionloss= "8e3">
+            <joint joint="Joint_1_R" coef="-0.01575"/>
+            <joint joint="Joint_2_R" coef="0.01575"/>
         </fixed>
     </tendon>
     
@@ -114,5 +132,8 @@
         <exclude body1="Link_1_R" body2="Link_2_R"/>
         
         <exclude body1="Sensor_base" body2="Sensor_middle"/>
+        
+        <exclude body1="Sensor_middle" body2="Link_2_R"/>
+        <exclude body1="Sensor_middle" body2="Link_2_L"/>
     </contact>
 </mujoco>

@@ -34,7 +34,7 @@ def main():
                     observations[j][k]['observation'] = np.concatenate([observations[j][k]['observation'], [0.5]])
                     actions[j][k] = np.concatenate([actions[j][k], [0.0]])
     
-        np.savez_compressed(fileName, acs=actions, obs=observations, info=infos) # save the file for
+        if render == 0: np.savez_compressed(fileName, acs=actions, obs=observations, info=infos) # save the file for
 
 def goToGoal(env, lastObs,numItr):
 

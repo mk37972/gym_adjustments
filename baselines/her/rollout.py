@@ -78,18 +78,14 @@ class RolloutWorker:
                 random_eps=self.random_eps if not self.exploit else 0.,
                 use_target_net=self.use_target_net)
 
-            
-
             if self.compute_Q:
                 u, Q = policy_output
                 Qs.append(Q)
-                # Fs.append(np.abs(np.float32((o[:,11:13] * (o[:,11:13] < 0.0)).sum(axis=-1))).mean())
-                # Fs.append(np.abs(np.float32(o[:,13] * (o[:,13] > 0.0))).mean())
-                # if np.abs(np.float32([e.env.prev_oforce for e in self.venv.envs])).mean() > 5.0: 
-                Fs.append(np.abs(np.float32([e.env.prev_oforce for e in self.venv.envs])).mean())
-                # Ks.append(np.abs(np.float32(o[:,13].sum(axis=-1))).mean())
-                # Ks.append(0.5)
-                Ks.append(np.abs(np.float32(o[:,14].sum(axis=-1))).mean())
+                # Fs.append(np.abs(np.float32((o[:,11:13] * (o[:,11:13] < 0.0)).sum(axis=-1))).mean()) # block
+                Fs.append(np.abs(np.float32([e.env.prev_oforce for e in self.venv.envs])).mean()) # chip
+                # Ks.append(np.abs(np.float32(o[:,13].sum(axis=-1))).mean()) # block 6D
+                # Ks.append(0.25) # block 4D, chip 3D
+                Ks.append(np.abs(np.float32(o[:,14].sum(axis=-1))).mean()) # chip 5D
             else:
                 u = policy_output
             if u.ndim == 1:
@@ -101,23 +97,15 @@ class RolloutWorker:
             success = np.zeros(self.rollout_batch_size)
             success2 = np.zeros(self.rollout_batch_size)
             
-            # success3 = np.zeros(self.rollout_batch_size)
             # compute new states and observations
             obs_dict_new, _, done, info = self.venv.step(u)
             # self.venv.render()
             o_new = obs_dict_new['observation']
             ag_new = obs_dict_new['achieved_goal']
             success = np.array([i.get('is_success', 0.0) for i in info])
-            # success2 = (np.float32(o[:,11:13].sum(axis=-1))*1000.0 > -147.15/3*6)
-            success2 = (np.float32(self.venv.envs[0].env.prev_oforce < self.venv.envs[0].env.object_fragility))
+            # success2 = (np.float32(o[:,11:13].sum(axis=-1))*1000.0 > -300.0) # block -147.15/3*6
+            success2 = (np.float32(self.venv.envs[0].env.prev_oforce < self.venv.envs[0].env.object_fragility)) # chip
             
-#            success2 = np.float32(o[:,13] == 0.0)
-
-            # success2 = (np.linalg.norm(o[:,-9:-6],axis=-1)) < 0.05
-            # success3 = (np.linalg.norm(o[:,-6:-3],axis=-1)) < 0.05
-            
-#            print(o_new[0,-4:])
-
             if any(done):
                 # here we assume all environments are done is ~same number of steps, so we terminate rollouts whenever any of the envs returns done
                 # trick with using vecenvs is not to add the obs from the environments that are "done", because those are already observations
@@ -158,12 +146,9 @@ class RolloutWorker:
         # stats
         successful = np.array(successes)[-1, :]
         successful2 = np.array(successes2)
-        # successful3 = np.array(successes3)
-#        successful2 = np.array(successes2)[-1, :]
         assert successful.shape == (self.rollout_batch_size,)
         success_rate = np.mean(successful)
         success_rate2 = np.mean(successful2.mean(axis=0))
-        # success_rate3 = np.mean(successful3.mean(axis=0))
         success_rate3 = np.mean(successful2.min(axis=0) * successful)
         self.success_history.append(success_rate)
         self.success_history2.append(success_rate2)

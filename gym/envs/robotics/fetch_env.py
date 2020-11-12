@@ -85,7 +85,7 @@ class FetchEnv(robot_env.RobotEnv):
                 fragile_goal = np.linalg.norm((achieved_goal[self.goaldim:] - goal[self.goaldim:])*((achieved_goal[self.goaldim:] - goal[self.goaldim:]) < 0), axis=-1) if self.model_path.find('wall') == -1 else np.linalg.norm((achieved_goal[self.goaldim:] - goal[self.goaldim:])*((achieved_goal[self.goaldim:] - goal[self.goaldim:]) > 0), axis=-1)
             if self.reward_type == 'sparse':
                 # print(d)
-                return -(d > self.distance_threshold).astype(np.float32) - np.float32(fragile_goal) * 2.0# - np.float32(penalty)/50.0
+                return -(d > self.distance_threshold).astype(np.float32) - np.float32(fragile_goal) * 2.# - np.float32(penalty)/50.0
             else:
                 return -d
         else:
@@ -183,7 +183,7 @@ class FetchEnv(robot_env.RobotEnv):
                 self.previous_input = action[2:]
             else:
                 try: action = np.concatenate([pos_ctrl, self.previous_input])
-                except: action = np.concatenate([pos_ctrl, np.zeros(3)])
+                except: action = np.concatenate([pos_ctrl, np.zeros(2)])
             
             
         # Apply action to simulation.
@@ -313,7 +313,7 @@ class FetchEnv(robot_env.RobotEnv):
             obs = np.concatenate([
                 grip_pos, object_rel_pos.ravel(), gripper_state, goal_rel_pos.ravel()
             ])
-
+        # print(len(obs))
         return {
             'observation': obs.copy(),
             'achieved_goal': achieved_goal.copy(),

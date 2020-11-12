@@ -59,30 +59,37 @@ _game_envs['retro'] = {
 
 
 def train(args, extra_args):
-    env_type, env_id = get_env_type(args)
-    print('env_type: {}'.format(env_type))
+    if args.env.find('NuFingers') == -1:
+        env_type, env_id = get_env_type(args)
+        alg_kwargs = get_learn_function_defaults(args.alg, env_type)
+        print('env_type: {}'.format(env_type))
+    else:
+        alg_kwargs = {'demo_file': extra_args['demo_file'], 'pert_type': args.perturb, 'n_actions': args.algdim, 'network': 'mlp'}
 
     total_timesteps = int(args.num_timesteps)
     seed = args.seed
 
     learn = get_learn_function(args.alg)
-    alg_kwargs = get_learn_function_defaults(args.alg, env_type)
+    
     extra_args['pert_type'] = args.perturb
     extra_args['n_actions'] = args.algdim
     alg_kwargs.update(extra_args)
     
+    
     env = None
-    env = build_env(args)
-    if args.save_video_interval != 0:
-        env = VecVideoRecorder(env, osp.join(logger.get_dir(), "videos"), record_video_trigger=lambda x: x % args.save_video_interval == 0, video_length=args.save_video_length)
+    if args.env.find('NuFingers') == -1:
+        env = build_env(args)
+        if args.save_video_interval != 0:
+            env = VecVideoRecorder(env, osp.join(logger.get_dir(), "videos"), record_video_trigger=lambda x: x % args.save_video_interval == 0, video_length=args.save_video_length)
+        print('Training {} on {}:{} with arguments \n{}'.format(args.alg, env_type, env_id, alg_kwargs))
+    else:
+        print('Training NuFingers using {} with arguments \n{}'.format(args.alg, alg_kwargs))
 
     if args.network:
         alg_kwargs['network'] = args.network
     else:
         if alg_kwargs.get('network') is None:
             alg_kwargs['network'] = get_default_network(env_type)
-
-    print('Training {} on {}:{} with arguments \n{}'.format(args.alg, env_type, env_id, alg_kwargs))
 
     model = learn(
         env=env,
@@ -257,7 +264,7 @@ def main(args):
         
         infos_list = []
         episodeInfo = []
-        
+        max_force = 0
         for k in range(50000):
             if state is not None:
                 actions, _, state, _ = model.step(obs,S=state, M=dones)
@@ -266,6 +273,8 @@ def main(args):
                 
             distance = np.linalg.norm(obs['achieved_goal'][0][:3] - obs['desired_goal'][0][:3])
             force = - env.envs[0].env.prev_lforce - env.envs[0].env.prev_rforce
+            if force > max_force: max_force = force
+            # force = env.envs[0].env.prev_oforce
             # print(force, env.envs[0].env.object_fragility, force>env.envs[0].env.object_fragility)
             # print(obs['observation'][0][11:13] ,actions)
             
@@ -301,6 +310,9 @@ def main(args):
                 seed += 1000
                 np.random.seed(seed)
                 set_global_seeds(seed)
+                
+                print(max_force)
+                max_force = 0
                 
         
                     

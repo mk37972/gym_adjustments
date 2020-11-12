@@ -2,6 +2,20 @@ import numpy as np
 
 from gym.envs.robotics import rotations, robot_env, utils
 
+R_j = np.matrix([[0.01575,0],
+                  [-0.01575, 0.01575]])
+R_j_inv = np.linalg.inv(R_j)
+R_j_L = np.matrix([[0.01575,0],
+                  [0.01575, 0.01575]])
+R_j_inv_L = np.linalg.inv(R_j_L)
+R_e = np.matrix([[0.0034597,0],
+                  [0, 0.0034597]])
+L1 = 0.1
+L2 = 0.075
+
+Ksc = 700
+
+Rm = 0.0285
 
 def goal_distance(goal_a, goal_b):
     assert goal_a.shape == goal_b.shape
@@ -13,9 +27,8 @@ class NuFingersEnv(robot_env.RobotEnv):
     """
 
     def __init__(
-        self, model_path, n_substeps, gripper_extra_height, block_gripper,
-        has_object, target_in_the_air, target_offset, obj_range, target_range,
-        distance_threshold, initial_qpos, reward_type, fragile_on=False, stiffness_on=False, series_on=False, parallel_on=False, pert_type='none', n_actions=4
+        self, model_path, n_substeps, target_range,
+        distance_threshold, initial_qpos, reward_type, n_actions, pert_type
     ):
         """Initializes a new Fetch environment.
 
@@ -34,25 +47,14 @@ class NuFingersEnv(robot_env.RobotEnv):
             reward_type ('sparse' or 'dense'): the reward type, i.e. sparse or dense
         """
         self.model_path = model_path
-        self.gripper_extra_height = gripper_extra_height
-        self.block_gripper = block_gripper
-        self.has_object = has_object
-        self.target_in_the_air = target_in_the_air
-        self.target_offset = target_offset
-        self.obj_range = obj_range
         self.target_range = target_range
         self.distance_threshold = distance_threshold
         self.reward_type = reward_type
-        self.fragile_on = fragile_on
-        self.stiffness_on = stiffness_on
-        self.series_on = series_on
-        self.parallel_on = parallel_on
         self.broken_table = False
         self.broken_object = False
-        self.max_stiffness = 50
+        self.max_stiffness = 1.0
         self.prev_stiffness = self.max_stiffness
-        self.psv_prev_stiffness = self.max_stiffness
-        self.par_prev_stiffness = 0.0
+        self.prev_stiffness_limit = self.max_stiffness
         self.object_fragility = 0.0
         self.min_grip = 0.0
         self.fric_mu = 0.2
@@ -61,58 +63,47 @@ class NuFingersEnv(robot_env.RobotEnv):
         self.prev_lforce = 0.0
         self.prev_rforce = 0.0
         self.prev_oforce = 0.0
-        self.n_actions = n_actions
         self.previous_input = 0
-        self.pert_type = pert_type
-        self.remaining_timestep = 50
+        self.remaining_timestep = 200
+        self.des_Fp_R = np.array([[0.0],[0.0]])
+        self.des_Fp_L = np.array([[0.0],[0.0]])
+        self.goal_dim = 1
 
         super(NuFingersEnv, self).__init__(
-            model_path=model_path, n_substeps=n_substeps, n_actions=n_actions,
-            initial_qpos=initial_qpos)
+            model_path=model_path, n_substeps=n_substeps, initial_qpos=initial_qpos, n_actions=n_actions)
 
     # GoalEnv methods
     # ----------------------------
 
     def compute_reward(self, achieved_goal, goal, info):
-        # Compute distance between goal and the achieved goal.
-        if self.fragile_on:
-            try: 
-                d = goal_distance(achieved_goal[:,:3], goal[:,:3])
-                fragile_goal = np.linalg.norm((achieved_goal[:,3:] - goal[:,3:])*((achieved_goal[:,3:] - goal[:,3:]) < 0), axis=-1)
-            except: 
-                d = goal_distance(achieved_goal[:3], goal[:3])
-                fragile_goal = np.linalg.norm((achieved_goal[3:] - goal[3:])*((achieved_goal[3:] - goal[3:]) < 0), axis=-1)
-            if self.reward_type == 'sparse':
-                
-                return -(d > self.distance_threshold).astype(np.float32) - np.float32(fragile_goal) * 2.0# - np.float32(penalty)/50.0
-            else:
-                return -d
-        else:
-            d = goal_distance(achieved_goal, goal)
-            if self.reward_type == 'sparse':
-                return -(d > self.distance_threshold).astype(np.float32)
-            else:
-                return -d
+        try: 
+            d = goal_distance(achieved_goal[:,:self.goal_dim], goal[:,:self.goal_dim])
+            fragile_goal = np.linalg.norm((achieved_goal[:,self.goal_dim:] - goal[:,self.goal_dim:])*((achieved_goal[:,self.goal_dim:] - goal[:,self.goal_dim:]) < 0), axis=-1)
+        except: 
+            d = goal_distance(achieved_goal[:self.goal_dim], goal[:self.goal_dim])
+            fragile_goal = np.linalg.norm((achieved_goal[self.goal_dim:] - goal[self.goal_dim:])*((achieved_goal[self.goal_dim:] - goal[self.goal_dim:]) < 0), axis=-1)
+        
+        return -(d > self.distance_threshold).astype(np.float32) - np.float32(fragile_goal) * 2.0
         
 
     # RobotEnv methods
     # ----------------------------
 
     def _step_callback(self):
-        if self.block_gripper:
-            self.sim.data.set_joint_qpos('robot0:l_gripper_finger_joint', 0.)
-            self.sim.data.set_joint_qpos('robot0:r_gripper_finger_joint', 0.)
-            self.sim.forward()
+        self.sim.forward()
 
     def _set_action(self, action):
         action = action.copy()  # ensure that we don't change the action outside of this scope
         # relative L action, TH action (right), relative L action, TH action (left)
-        pos_ctrl_R, pos_ctrl_L = action[:2], action[-2:]
+        # np.array([des_l_R - p_R[0,0], (des_th_R - p_R[1,0]) * np.pi / 180.0, des_l_L - p_L[0,0], (des_th_L - p_L[1,0]) * np.pi / 180.0, 0.0, 0.0])
+        pos_ctrl_R, pos_ctrl_L = action[:2], action[2:4]
+        # pos_ctrl_R *= np.array([0.01, np.pi/10.0])
+        # pos_ctrl_L *= np.array([0.01, np.pi/10.0])
         stiffness_ctrl = 0.0
         stiffness_limit = 0.0
 
-        pos_ctrl_R = np.clip(pos_ctrl_R, np.array([-0.2, -0.1]), np.array([0.2, 0.1]))
-        pos_ctrl_L = np.clip(pos_ctrl_L, np.array([-0.2, -0.1]), np.array([0.2, 0.1]))
+        # pos_ctrl_R = np.clip(pos_ctrl_R, np.array([-0.2, -0.1]), np.array([0.2, 0.1]))
+        # pos_ctrl_L = np.clip(pos_ctrl_L, np.array([-0.2, -0.1]), np.array([0.2, 0.1]))
         
         if action.shape[0] > 4:
             stiffness_limit = 0.2 * self.max_stiffness * action[5]
@@ -125,78 +116,113 @@ class NuFingersEnv(robot_env.RobotEnv):
             self.prev_stiffness += stiffness_ctrl
             self.prev_stiffness = np.max([np.min([self.prev_stiffness, self.prev_stiffness_limit]), 0.0])
         
-        action = np.concatenate([pos_ctrl_R, pos_ctrl_L, [self.prev_stiffness]])
+        Pc_R = np.array([-0.0635, 0.127])
+        Pc_L = np.array([0.0635, 0.127])
+        [xR, yR, zR] = self.sim.data.site_xpos[self.sim.model.site_name2id('Right_fingertip')]
+        [xL, yL, zL] = self.sim.data.site_xpos[self.sim.model.site_name2id('Left_fingertip')]
         
-        # Apply action to simulation.
-        utils.ctrl_set_action(self.sim, action)
+        P_R = np.array([yR - 0.0889, 0.0873 - xR])
+        P_L = np.array([yL + 0.0889, 0.0873 - xL])
+        [xR, yR] = P_R
+        [xL, yL] = P_L
+        
+        Prel_R = Pc_R - P_R
+        Prel_L = Pc_L - P_L
+        l_R = np.sqrt(Prel_R[0]*Prel_R[0] + Prel_R[1]*Prel_R[1])
+        l_L = np.sqrt(Prel_L[0]*Prel_L[0] + Prel_L[1]*Prel_L[1])
+        p_R = np.array([[l_R],[np.arctan2(-Prel_R[1],-Prel_R[0])]])
+        p_L = np.array([[l_L],[np.arctan2(Prel_L[1],Prel_L[0])]])
+        
+        r = np.array([[self.prev_stiffness], [1.0]])
+        des_l_R = p_R[0,0] + pos_ctrl_R[0]
+        des_th_R = p_R[1,0] + pos_ctrl_R[1]
+        # print(pos_ctrl_R)
+        des_p_R = np.array([[np.min([np.max([des_l_R, -0.06]), 0.06])], [np.min([np.max([des_th_R, -np.pi/2.0]), np.pi/2.0])]])#0.7854
+        
+        des_l_L = p_L[0,0] + pos_ctrl_L[0]
+        des_th_L = p_L[1,0] + pos_ctrl_L[1]
+        des_p_L = np.array([[np.min([np.max([des_l_L, -0.06]), 0.06])], [np.min([np.max([des_th_L, -np.pi/2.0]), np.pi/2.0])]])#0.7854
+        # print(p_L)
+        Rj = np.array([[self.sim.data.qpos[self.sim.model.jnt_qposadr[self.sim.model.joint_name2id('Joint_1_R')]] + self.sim.data.qpos[self.sim.model.jnt_qposadr[self.sim.model.joint_name2id('FakeJoint_1_R')]]],
+                       [self.sim.data.qpos[self.sim.model.jnt_qposadr[self.sim.model.joint_name2id('Joint_2_R')]] + self.sim.data.qpos[self.sim.model.jnt_qposadr[self.sim.model.joint_name2id('FakeJoint_2_R')]]]])
+        # print(Rj)
+        Lj = np.array([[self.sim.data.qpos[self.sim.model.jnt_qposadr[self.sim.model.joint_name2id('Joint_1_L')]] + self.sim.data.qpos[self.sim.model.jnt_qposadr[self.sim.model.joint_name2id('FakeJoint_1_L')]]],
+                       [self.sim.data.qpos[self.sim.model.jnt_qposadr[self.sim.model.joint_name2id('Joint_2_L')]] + self.sim.data.qpos[self.sim.model.jnt_qposadr[self.sim.model.joint_name2id('FakeJoint_2_L')]]]])
+        Jp_R = np.matrix([[-Prel_R[0]/l_R, -Prel_R[1]/l_R],[Prel_R[1]/l_R/l_R, -Prel_R[0]/l_R/l_R]])
+        Jp_L = np.matrix([[-Prel_L[0]/l_L, -Prel_L[1]/l_L],[Prel_L[1]/l_L/l_L, -Prel_L[0]/l_L/l_L]])
+        Jp_inv_R = np.matrix([[Jp_R[1,1] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0]), -Jp_R[0,1] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0])], [-Jp_R[1,0] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0]), Jp_R[0,0] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0])]])
+        Jp_inv_L = np.matrix([[Jp_L[1,1] / (Jp_L[0,0]*Jp_L[1,1] - Jp_L[0,1]*Jp_L[1,0]), -Jp_L[0,1] / (Jp_L[0,0]*Jp_L[1,1] - Jp_L[0,1]*Jp_L[1,0])], [-Jp_L[1,0] / (Jp_L[0,0]*Jp_L[1,1] - Jp_L[0,1]*Jp_L[1,0]), Jp_L[0,0] / (Jp_L[0,0]*Jp_L[1,1] - Jp_L[0,1]*Jp_L[1,0])]])
+        J_R = np.matrix([[-yR, L2 * np.cos(Rj[0,0]-Rj[1,0])], 
+                         [xR, L2 * np.sin(Rj[0,0]-Rj[1,0])]])
+        J_L = np.matrix([[-yL, -L2 * np.cos(Lj[0,0]+Lj[1,0])], 
+                         [xL, -L2 * np.sin(Lj[0,0]+Lj[1,0])]])
+        J_inv_R = np.matrix([[J_R[1,1] / (J_R[0,0]*J_R[1,1] - J_R[0,1]*J_R[1,0]), -J_R[0,1] / (J_R[0,0]*J_R[1,1] - J_R[0,1]*J_R[1,0])], [-J_R[1,0] / (J_R[0,0]*J_R[1,1] - J_R[0,1]*J_R[1,0]), J_R[0,0] / (J_R[0,0]*J_R[1,1] - J_R[0,1]*J_R[1,0])]])
+        J_inv_L = np.matrix([[J_L[1,1] / (J_L[0,0]*J_L[1,1] - J_L[0,1]*J_L[1,0]), -J_L[0,1] / (J_L[0,0]*J_L[1,1] - J_L[0,1]*J_L[1,0])], [-J_L[1,0] / (J_L[0,0]*J_L[1,1] - J_L[0,1]*J_L[1,0]), J_L[0,0] / (J_L[0,0]*J_L[1,1] - J_L[0,1]*J_L[1,0])]])
+        max_kj_R = np.transpose(R_j) * np.matrix([[self.sim.model.tendon_stiffness[self.sim.model.tendon_name2id('T1_R')], 0],[0, self.sim.model.tendon_stiffness[self.sim.model.tendon_name2id('T2_R')]]]) * R_j
+        max_kj_L = np.transpose(R_j_L) * np.matrix([[self.sim.model.tendon_stiffness[self.sim.model.tendon_name2id('T1_L')], 0],[0, self.sim.model.tendon_stiffness[self.sim.model.tendon_name2id('T2_L')]]]) * R_j_L
+        max_k_R = np.transpose(J_inv_R) * max_kj_R * J_inv_R
+        max_k_L = np.transpose(J_inv_L) * max_kj_L * J_inv_L
+        max_kp_R = np.transpose(Jp_inv_R) * max_k_R * Jp_inv_R
+        max_kp_L = np.transpose(Jp_inv_L) * max_k_L * Jp_inv_L
+        self.des_Fp_R = max_kp_R * (r * (des_p_R - p_R))
+        self.des_Fp_L = max_kp_L * (r * (des_p_L - p_L))
+        des_F_R = np.transpose(Jp_R) * self.des_Fp_R
+        des_F_L = np.transpose(Jp_L) * self.des_Fp_L
+        des_tau_R = np.transpose(J_R) * des_F_R
+        des_tau_L = np.transpose(J_L) * des_F_L
+        des_mR = ((np.matrix([[1/self.sim.model.tendon_stiffness[self.sim.model.tendon_name2id('T1_R')], 0],[0, 1/self.sim.model.tendon_stiffness[self.sim.model.tendon_name2id('T2_R')]]]) * np.transpose(R_j_inv)*des_tau_R) + R_j * Rj) / Rm 
+        des_mL = ((np.matrix([[1/self.sim.model.tendon_stiffness[self.sim.model.tendon_name2id('T1_L')], 0],[0, 1/self.sim.model.tendon_stiffness[self.sim.model.tendon_name2id('T2_L')]]]) * np.transpose(R_j_inv_L)*des_tau_L) + R_j_L * Lj) / Rm
+        
+        self.sim.data.ctrl[0] = des_mL[0,0]
+        self.sim.data.ctrl[1] = des_mL[1,0]
+        self.sim.data.ctrl[2] = des_mR[0,0]
+        self.sim.data.ctrl[3] = des_mR[1,0]
 
     def _get_obs(self):
         # positions
         self.remaining_timestep -= 1
-#        print(self.remaining_timestep)
-        grip_pos = self.sim.data.get_site_xpos('robot0:grip')
-        dt = self.sim.nsubsteps * self.sim.model.opt.timestep
-        grip_velp = self.sim.data.get_site_xvelp('robot0:grip') * dt
-        robot_qpos, robot_qvel = utils.robot_get_obs(self.sim)
+        l_finger_force = self.prev_lforce + (self.des_Fp_R[0,0] - self.prev_lforce) * 0.004 / 0.05
+        r_finger_force = self.prev_rforce + (self.des_Fp_L[0,0] - self.prev_rforce) * 0.004 / 0.05  
         
-        object_pos = self.sim.data.qpos[self.sim.model.joint_name2id('Sensor_joint')]
+        Pc_R = np.array([-0.0635, 0.127])
+        Pc_L = np.array([0.0635, 0.127])
+        [xR, yR, zR] = self.sim.data.site_xpos[self.sim.model.site_name2id('Right_fingertip')]
+        [xL, yL, zL] = self.sim.data.site_xpos[self.sim.model.site_name2id('Left_fingertip')]
         
-        gripper_state = robot_qpos[-2:]
-        gripper_vel = robot_qvel[-2:] * dt  # change to a scalar if the gripper is made symmetric
+        P_R = np.array([yR - 0.0889, 0.0873 - xR])
+        P_L = np.array([yL + 0.0889, 0.0873 - xL])
+        [xR, yR] = P_R
+        [xL, yL] = P_L
         
-        goal_rel_pos = self.goal.copy() - object_pos
-
-        achieved_goal = object_pos
+        Prel_R = Pc_R - P_R
+        Prel_L = Pc_L - P_L
+        l_R = np.sqrt(Prel_R[0]*Prel_R[0] + Prel_R[1]*Prel_R[1])
+        l_L = np.sqrt(Prel_L[0]*Prel_L[0] + Prel_L[1]*Prel_L[1])
+        p_R = np.array([[l_R],[np.arctan2(-Prel_R[1],-Prel_R[0])]])
+        p_L = np.array([[l_L],[np.arctan2(Prel_L[1],Prel_L[0])]])
         
-        finger_force = (self.sim.data.ctrl[0] - self.sim.data.sensordata[self.sim.model.sensor_name2id('robot0:Sjp_WRJ0')]) * self.sim.model.actuator_gainprm[self.sim.model.actuator_name2id('robot0:A_WRJ0'), 0] - self.sim.data.sensordata[self.sim.model.sensor_name2id('robot0:Sjp_WRJ0')] * self.sim.model.jnt_stiffness[self.sim.model.joint_name2id('robot0:WRJ0')]
-        finger_force = self.prev_force + (finger_force - self.prev_force) * dt / 0.05
+        obj_rot = self.sim.data.qpos[self.sim.model.jnt_qposadr[self.sim.model.joint_name2id('Sensor_joint')]]
+        observation = np.array([p_R[0,0], p_L[0,0], p_R[1,0], p_L[1,0], 
+                                (obj_rot - p_R[1,0]), (obj_rot - p_L[1,0]), 
+                                (self.goal[0] - obj_rot), (self.goal[0] - obj_rot),
+                                l_finger_force * 0.1, r_finger_force * 0.1, 
+                                self.prev_stiffness, self.prev_stiffness_limit])
         
-        object_force = self.prev_oforce + (self.sim.data.sensordata[self.sim.model.sensor_name2id('object_frc')] - self.prev_oforce) * dt / 0.1
+        modified_obs = dict(observation=observation, achieved_goal=np.array([obj_rot, l_finger_force * 0.1, r_finger_force * 0.1]), desired_goal = self.goal)
         
-        if self.n_actions == 3:
-            conc_stiffness_data = np.array([finger_force])/100.0
-        elif self.n_actions == 4:
-            conc_stiffness_data = np.concatenate([[finger_force,
-                                 self.prev_stiffness]])/100.0
+        self.prev_lforce = l_finger_force
+        self.prev_rforce = r_finger_force
         
-        if (object_force > self.object_fragility):
-            self.sim.model.geom_matid[self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]:self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]+4] = 6
-            self.broken_object = 1.0
-        elif object_force > 0.0:
-            self.sim.model.geom_matid[self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]:self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]+4] = 5
-            self.broken_object = 0.0
-            
-        obs = np.concatenate([
-            grip_pos, object_rel_pos.ravel(), [robot_qpos[2]], goal_rel_pos.ravel(), conc_stiffness_data
-        ])
-        achieved_goal = np.concatenate([achieved_goal, conc_stiffness_data[:1]])
-        
-        self.prev_force = finger_force
-        self.prev_oforce = object_force
-        return {
-            'observation': obs.copy(),
-            'achieved_goal': achieved_goal.copy(),
-            'desired_goal': self.goal.copy(),
-        }
+        return modified_obs
 
     def _viewer_setup(self):
-        body_id = self.sim.model.body_name2id('robot0:gripper_link') if self.model_path.find('wall') == -1 else self.sim.model.body_name2id('basket')
-        lookat = self.sim.data.body_xpos[body_id]
-        for idx, value in enumerate(lookat):
-            self.viewer.cam.lookat[idx] = value
-        self.viewer.cam.distance = 2.5
-        self.viewer.cam.azimuth = 132.
-        self.viewer.cam.elevation = -14.
+        self.viewer.cam.distance = 0.5
+        self.viewer.cam.azimuth = 32.
+        self.viewer.cam.elevation = -30.
 
     def _render_callback(self):
         # Visualize target.
-        if self.model_path.find('wall') == -1:
-            sites_offset = (self.sim.data.site_xpos - self.sim.model.site_pos).copy()
-            site_id = self.sim.model.site_name2id('target0')
-            self.sim.model.site_pos[site_id] = self.goal[:3] - sites_offset[site_id]
-        else:
-            self.sim.model.body_pos[self.sim.model.body_name2id('target')] = self.goal[:3]
-#        print("SITE POS: {}, SITE OFFSET: {}, GOAL: {}".format(self.sim.model.site_pos[site_id], sites_offset[site_id], self.goal[:3]))
+        self.sim.model.site_quat[self.sim.model.site_name2id('target0')] = np.array([np.cos(self.goal[0]/2.0), np.sin(self.goal[0]/2.0), 0.0, 0.0])
         self.sim.forward()
 
     def _reset_sim(self):
@@ -204,96 +230,42 @@ class NuFingersEnv(robot_env.RobotEnv):
         
         # reset the broken objects
         self.broken_object = False
-        self.sim.model.geom_matid[self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]:self.sim.model.body_geomadr[self.sim.model.body_name2id('object0')]+4] = 5
+        # self.sim.model.geom_rgba[-1]
         
         # reset stiffness
         self.prev_stiffness = self.max_stiffness
-        self.psv_prev_stiffness = self.max_stiffness
-        self.par_prev_stiffness = 0.0
+        self.prev_stiffness_limit = self.max_stiffness
         
         # reset forces
         self.prev_lforce = 0.0
         self.prev_rforce = 0.0
-        self.prev_force = 0.0
         self.prev_oforce = 0.0
         
-        self.remaining_timestep = 50
+        self.remaining_timestep = 200
 
         # Randomize start position of object.
-        if self.has_object and self.model_path.find('wall') == -1:
-            object_xpos = self.initial_gripper_xpos[:2]
-            while np.linalg.norm(object_xpos - self.initial_gripper_xpos[:2]) < 0.1:
-                object_xpos = self.initial_gripper_xpos[:2] + self.np_random.uniform(-self.obj_range, self.obj_range, size=2)
-            object_qpos = self.sim.data.get_joint_qpos('object0:joint')
-            assert object_qpos.shape == (7,)
-            object_qpos[:2] = object_xpos
-            self.sim.data.set_joint_qpos('object0:joint', object_qpos)
-        elif self.model_path.find('wall') != -1:
-            initial_qpos = self.sim.data.get_joint_qpos('object0:joint').copy()
-            initial_pos, initial_quat = initial_qpos[:3], initial_qpos[3:]
-            initial_pos += np.array([np.random.random()*0.5-0.25, 0, 0])
-            initial_qpos[:3] = initial_pos
-            self.sim.data.set_joint_qpos('object0:joint', initial_qpos)
-        if self.fragile_on:
-            self.sim.model.body_mass[self.sim.model.body_name2id('object0')] = 0.1 #np.random.random() * 5.0
-            self.min_grip = self.sim.model.body_mass[self.sim.model.body_name2id('object0')] * self.grav_const / (2 * self.fric_mu)
-            self.object_fragility = 6.0 * self.min_grip #5.0 * np.random.random() * self.min_grip + 2.0 * self.min_grip
-        elif self.has_object:
-            initial_qpos = self.sim.data.get_joint_qpos('object0:joint').copy()
-            initial_qpos[:3] += np.array([np.random.random()*0.5-0.25, 0, 0])
-            self.sim.data.set_joint_qpos('object0:joint', initial_qpos)
 
         self.sim.forward()
         return True
 
     def _sample_goal(self):
-        if self.has_object and self.model_path.find('wall') == -1:
-            goal = self.initial_gripper_xpos[:3] + self.np_random.uniform(-self.target_range, self.target_range, size=3)
-            goal += self.target_offset
-            goal[2] = self.height_offset
-            if self.target_in_the_air and self.np_random.uniform() < 0.5:
-                goal[2] += self.np_random.uniform(0, 0.45)
-        elif self.has_object:
-            offset = np.array([0.5*np.random.random()-0.27, 0.35*np.random.random(), 0.0])
-            offset[2] = offset[1]
-            goal = np.array([1.015, 0.78, -0.09]) + offset
-        else:
-            goal = self.initial_gripper_xpos[:3] + self.np_random.uniform(-0.15, 0.15, size=3)
-            
-        if self.model_path.find('wall') == -1: return np.concatenate([goal.copy(), [0.0, 0.0]])
-        else: return np.concatenate([goal.copy(), [0.0]])
+        goal = self.np_random.uniform(-self.target_range, self.target_range, size=1)
+        return np.concatenate([goal.copy(), [0.0, 0.0]])
 
     def _is_success(self, achieved_goal, desired_goal):
-        if self.fragile_on:
-            try: 
-                d = goal_distance(achieved_goal[:,:3], desired_goal[:,:3])
-                fragile_goal = np.linalg.norm(achieved_goal[:,3:] - desired_goal[:,3:], axis=-1)
-            except: 
-                d = goal_distance(achieved_goal[:3], desired_goal[:3])
-                fragile_goal = np.linalg.norm(achieved_goal[3:] - desired_goal[3:])
-        else: d = goal_distance(achieved_goal, desired_goal)
-#        return (((d < self.distance_threshold).astype(np.float32) + np.float32(fragile_goal.sum(axis=-1)*1000.0 < self.object_fragility)) == 2.0).astype(np.float32) if self.fragile_on else (d < self.distance_threshold).astype(np.float32)
+        try: 
+            d = goal_distance(achieved_goal[:,:self.goal_dim], desired_goal[:,:self.goal_dim])
+        except: 
+            d = goal_distance(achieved_goal[:self.goal_dim], desired_goal[:self.goal_dim])
         return (d < self.distance_threshold).astype(np.float32)
 
     def _env_setup(self, initial_qpos):
         for name, value in initial_qpos.items():
             self.sim.data.set_joint_qpos(name, value)
-        utils.reset_mocap_welds(self.sim)
         self.sim.forward()
 
-        # Move end effector into position.
-        gripper_target = np.array([-0.498, 0.005, -0.431 + self.gripper_extra_height]) + self.sim.data.get_site_xpos('robot0:grip')
-        gripper_rotation = np.array([1., 0., 1., 0.])
-        if self.model_path.find('wall') == -1:
-            self.sim.data.set_mocap_pos('robot0:mocap', gripper_target)
-            self.sim.data.set_mocap_quat('robot0:mocap', gripper_rotation)
         for _ in range(10):
             self.sim.step()
 
-        # Extract information for sampling goals.
-        self.initial_gripper_xpos = self.sim.data.get_site_xpos('robot0:grip').copy()
-        if self.has_object:
-            self.height_offset = self.sim.data.get_site_xpos('object0')[2]
-
     def render(self, mode='human', width=500, height=500):
-        return super(FetchEnv, self).render(mode, width, height)
+        return super(NuFingersEnv, self).render(mode, width, height)

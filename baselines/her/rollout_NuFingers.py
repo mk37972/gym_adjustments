@@ -9,16 +9,10 @@ from nifpga import Session
 import time
 import click
 
-R_j = np.matrix([[0.01575,0],
-                  [0.01575, 0.01575]])
-R_j_inv = np.linalg.inv(R_j)
-R_e = np.matrix([[0.0034597,0],
-                  [0, 0.0034597]])
-
 class RolloutWorker:
 
     @store_args
-    def __init__(self, venv, policy, dims, logger, T, rollout_batch_size=1,
+    def __init__(self, policy, dims, logger, T, rollout_batch_size=1,
                  exploit=False, use_target_net=False, compute_Q=False, noise_eps=0,
                  random_eps=0, history_len=100, render=False, monitor=False, **kwargs):
         """Rollout worker generates experience by interacting with one or many environments.
@@ -39,9 +33,7 @@ class RolloutWorker:
             render (boolean): whether or not to render the rollouts
         """
 
-        assert self.T > 0
-
-        self.info_keys = [key.replace('info_', '') for key in dims.keys() if key.startswith('info_')]
+        self.info_keys = [key.replace('info_', '') for key in self.dims.keys() if key.startswith('info_')]
 
         self.success_history = deque(maxlen=history_len)
         self.success_history2 = deque(maxlen=history_len)
@@ -49,16 +41,146 @@ class RolloutWorker:
         self.Q_history = deque(maxlen=history_len)
         self.F_history = deque(maxlen=history_len)
         self.K_history = deque(maxlen=history_len)
+        
+        self.R_j = np.matrix([[0.01575,0],
+                          [-0.01575, 0.01575]])
+        self.R_j_inv = np.linalg.inv(self.R_j)
+        self.R_j_L = np.matrix([[0.01575,0],
+                          [0.01575, 0.01575]])
+        self.R_j_inv_L = np.linalg.inv(self.R_j_L)
+        self.R_e = np.matrix([[0.0034597,0],
+                          [0, 0.0034597]])
+        self.L1 = 0.1
+        self.L2 = 0.075
+        
+        self.Ksc = 700
+        
+        self.Rm = 0.0285
+                        
+        self.Pc_R = np.array([-0.0635, 0.121])
+        self.Pc_L = np.array([0.0635, 0.121])
+        self.max_kj_R = np.transpose(self.R_j) * np.matrix([[2*self.Ksc, 0],[0, 2*self.Ksc]]) * self.R_j
+        self.max_kj_L = np.transpose(self.R_j_L) * np.matrix([[2*self.Ksc, 0],[0, 2*self.Ksc]]) * self.R_j_L
+        
+        self.stiffness = 1.0
+        self.stiffness_lim = 1.0
+        
+        self.l_limit = 0.15
+        self.th_limit = np.pi/4.0
+        
+        self.l_step_limit = 0.08
+        self.th_step_limit = np.pi/8.0
+        
+        self.vel_limit = 0.12
+        
+        self.object_fragility = 3.5
+        
+        self.offset = np.array([56.447998046875,124.36520385742188,431.27996826171875,-669.9900512695312])
 
         self.n_episodes = 0
         self.reset_all_rollouts()
         self.clear_history()
 
     def reset_all_rollouts(self):
-        self.obs_dict = self.venv.reset()
-        self.initial_o = self.obs_dict['observation']
-        self.initial_ag = self.obs_dict['achieved_goal']
-        self.g = self.obs_dict['desired_goal']
+        with Session(bitfile="SCPC-lv-noFIFO_FPGATarget_FPGAmainepos_1XvgQEcJVeE.lvbitx", resource="rio://10.157.23.150/RIO0") as session:
+            act_Rj1=session.registers['Mod3/AO0']
+            enc_Rj1=session.registers['Rj1']
+            act_Rj2=session.registers['Mod3/AO1']
+            enc_Rj2=session.registers['Rj2']
+            
+            act_Lj1=session.registers['Mod3/AO3']
+            enc_Lj1=session.registers['Lj1']
+            act_Lj2=session.registers['Mod3/AO4']
+            enc_Lj2=session.registers['Lj2']
+            
+            sen_f=session.registers['fsensor']
+            sen_e=session.registers['fencoder']
+            
+            des_l = 0.08
+            des_th = 0.
+            
+            des_p = np.array([[np.min([np.max([des_l, -self.l_limit]), self.l_limit])], [np.min([np.max([des_th, -self.th_limit]), self.th_limit])]])#0.7854
+            des_p_R = np.array([des_p[0]/2.0, des_p[1]])
+            des_p_L = des_p_R
+            
+            r = 0.3*np.array([[1.0], [1.0]])
+            
+            new_goal = np.random.random()*np.pi/3.0 - np.pi/9.0
+            
+            for i in range(100):
+                
+                Re1 = enc_Rj1.read()
+                Re2 = enc_Rj2.read()
+                Le1 = enc_Lj1.read()
+                Le2 = enc_Lj2.read()
+                
+                f_sensor = 5.1203 * sen_f.read() - 5.2506
+                e_sensor = (((sen_e.read()) - (f_sensor / 100.0 * 0.15)) -2.9440)/0.0148
+                
+                Rj = self.R_j_inv * self.R_e * np.array([[Re1-self.offset[0]],[-Re2+self.offset[1]]]) * np.pi/180.0
+                Lj = self.R_j_inv_L * self.R_e * np.array([[Le1-self.offset[2]],[Le2-self.offset[3]]]) * np.pi/180.0
+                
+                xR = self.L1 * np.cos(Rj[0,0] + np.pi/2.0) + self.L2 * np.cos(Rj[0,0]-Rj[1,0] + np.pi/2.0)
+                yR = self.L1 * np.sin(Rj[0,0] + np.pi/2.0) + self.L2 * np.sin(Rj[0,0]-Rj[1,0] + np.pi/2.0)
+                xL = self.L1 * np.cos(Lj[0,0] + np.pi/2.0) + self.L2 * np.cos(Lj[0,0]+Lj[1,0] + np.pi/2.0)
+                yL = self.L1 * np.sin(Lj[0,0] + np.pi/2.0) + self.L2 * np.sin(Lj[0,0]+Lj[1,0] + np.pi/2.0)
+                P_R = np.array([xR, yR])
+                P_L = np.array([xL, yL])
+                Prel_R = self.Pc_R - P_R
+                Prel_L = self.Pc_L - P_L
+                l_R = np.sqrt(Prel_R[0]*Prel_R[0] + Prel_R[1]*Prel_R[1])
+                l_L = np.sqrt(Prel_L[0]*Prel_L[0] + Prel_L[1]*Prel_L[1])
+                p_R = np.array([[l_R],[np.arctan2(-Prel_R[1],-Prel_R[0])]])
+                p_L = np.array([[l_L],[np.arctan2(Prel_L[1],Prel_L[0])]])
+                
+                Jp_R = np.matrix([[-Prel_R[0]/l_R, -Prel_R[1]/l_R],[Prel_R[1]/l_R/l_R, -Prel_R[0]/l_R/l_R]])
+                Jp_L = np.matrix([[-Prel_L[0]/l_L, -Prel_L[1]/l_L],[Prel_L[1]/l_L/l_L, -Prel_L[0]/l_L/l_L]])
+                Jp_inv_R = np.matrix([[Jp_R[1,1] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0]), -Jp_R[0,1] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0])], [-Jp_R[1,0] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0]), Jp_R[0,0] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0])]])
+                Jp_inv_L = np.matrix([[Jp_L[1,1] / (Jp_L[0,0]*Jp_L[1,1] - Jp_L[0,1]*Jp_L[1,0]), -Jp_L[0,1] / (Jp_L[0,0]*Jp_L[1,1] - Jp_L[0,1]*Jp_L[1,0])], [-Jp_L[1,0] / (Jp_L[0,0]*Jp_L[1,1] - Jp_L[0,1]*Jp_L[1,0]), Jp_L[0,0] / (Jp_L[0,0]*Jp_L[1,1] - Jp_L[0,1]*Jp_L[1,0])]])
+                J_R = np.matrix([[-yR, self.L2 * np.cos(Rj[0,0]-Rj[1,0])], 
+                                 [xR, self.L2 * np.sin(Rj[0,0]-Rj[1,0])]])
+                J_L = np.matrix([[-yL, -self.L2 * np.cos(Lj[0,0]+Lj[1,0])], 
+                                 [xL, -self.L2 * np.sin(Lj[0,0]+Lj[1,0])]])
+                J_inv_R = np.matrix([[J_R[1,1] / (J_R[0,0]*J_R[1,1] - J_R[0,1]*J_R[1,0]), -J_R[0,1] / (J_R[0,0]*J_R[1,1] - J_R[0,1]*J_R[1,0])], [-J_R[1,0] / (J_R[0,0]*J_R[1,1] - J_R[0,1]*J_R[1,0]), J_R[0,0] / (J_R[0,0]*J_R[1,1] - J_R[0,1]*J_R[1,0])]])
+                J_inv_L = np.matrix([[J_L[1,1] / (J_L[0,0]*J_L[1,1] - J_L[0,1]*J_L[1,0]), -J_L[0,1] / (J_L[0,0]*J_L[1,1] - J_L[0,1]*J_L[1,0])], [-J_L[1,0] / (J_L[0,0]*J_L[1,1] - J_L[0,1]*J_L[1,0]), J_L[0,0] / (J_L[0,0]*J_L[1,1] - J_L[0,1]*J_L[1,0])]])
+                
+                max_k_R = np.transpose(J_inv_R) * self.max_kj_R * J_inv_R
+                max_k_L = np.transpose(J_inv_L) * self.max_kj_L * J_inv_L
+                max_kp_R = np.transpose(Jp_inv_R) * max_k_R * Jp_inv_R
+                max_kp_L = np.transpose(Jp_inv_L) * max_k_L * Jp_inv_L
+                des_Fp_R = max_kp_R * (r * (des_p_R - p_R))
+                des_Fp_L = max_kp_L * (r * (des_p_L - p_L))
+                des_F_R = np.transpose(Jp_R) * des_Fp_R
+                des_F_L = np.transpose(Jp_L) * des_Fp_L
+                des_tau_R = np.transpose(J_R) * des_F_R
+                des_tau_L = np.transpose(J_L) * des_F_L
+                des_mR = (np.transpose(self.R_j_inv)*des_tau_R / (2*self.Ksc) + self.R_j * Rj) / self.Rm 
+                des_mL = (np.transpose(self.R_j_inv_L)*des_tau_L / (2*self.Ksc) + self.R_j_L * Lj) / self.Rm
+                
+                # Position control mode)
+                # act_Rj1.write(np.min([np.max([des_mR[0,0] * 180.0 / np.pi * 0.117258, -10.0]),10.0]))
+                # act_Rj2.write(np.min([np.max([des_mR[1,0] * 180.0 / np.pi * 0.117541, -10.0]),10.0]))
+                # act_Lj1.write(np.min([np.max([des_mL[0,0] * 180.0 / np.pi * 0.117729, -10.0]),10.0]))
+                # act_Lj2.write(np.min([np.max([des_mL[1,0] * 180.0 / np.pi * 0.117679, -10.0]),10.0]))
+                
+                time.sleep(0.004)
+                
+            observation = np.array([[p_R[0,0] * 10 - 1.0, p_L[0,0] * 10 - 1.0, p_R[1,0], p_L[1,0], 
+                                          ((e_sensor -2.9440)/0.0148* np.pi / 180.0 - p_R[1,0]) , ((e_sensor -2.9440)/0.0148* np.pi / 180.0 - p_L[1,0]), 
+                                          (new_goal - (e_sensor -2.9440)/0.0148 * np.pi / 180.0),
+                                          des_Fp_R[0,0] * 0.1, des_Fp_L[0,0] * 0.1, 
+                                          self.stiffness, self.stiffness_lim]])
+        
+            self.obs_dict = dict(observation = observation,
+                                 achieved_goal = np.array([[e_sensor * np.pi/ 180.0, des_Fp_R[0,0] * 0.1, des_Fp_L[0,0] * 0.1]]),
+                                 desired_goal = np.array([[new_goal, 0.0, 0.0]]),
+                                 )
+            
+            self.initial_o = self.obs_dict['observation']
+            self.initial_ag = self.obs_dict['achieved_goal']
+            self.g = self.obs_dict['desired_goal']
+            self.stiffness = 1.0
+            self.stiffness_lim = 1.0
 
     def generate_rollouts(self):
         """Performs `rollout_batch_size` rollouts in parallel for time horizon `T` with the current
@@ -73,9 +195,9 @@ class RolloutWorker:
         ag[:] = self.initial_ag
 
         # generate episodes
-        obs, achieved_goals, acts, goals, successes, successes2, successes3 = [], [], [], [], [], [], []
+        obs, achieved_goals, acts, goals, successes, successes2 = [], [], [], [], [], []
         dones = []
-        info_values = [np.empty((self.T - 1, self.rollout_batch_size, self.dims['info_' + key]), np.float32) for key in self.info_keys]
+        info_values = [np.empty((self.T-1, self.rollout_batch_size, self.dims['info_' + key]), np.float32) for key in self.info_keys]
         Qs = []
         Fs = []
         Ks = []
@@ -92,23 +214,38 @@ class RolloutWorker:
             enc_Lj2=session.registers['Lj2']
             
             sen_f=session.registers['fsensor']
+            sen_e=session.registers['fencoder']
             
-            for i in range(1000):
-                Re1 = enc_Rj1.read()
-                Re2 = enc_Rj2.read()
-                Le1 = enc_Lj1.read()
-                Le2 = enc_Lj2.read()
-                
-                f_sensor = 5.1203 * sen_f.read() - 5.2506
-                
-                Rj = R_j_inv * R_e * np.array([[Re1],[Re2]]) * np.pi/180.0
-                Lj = R_j_inv * R_e * np.array([[Le1],[Le2]]) * np.pi/180.0
-                
-                act_Rj2.write(3*np.sin(data[i]))
-                act_Lj2.write(3*np.sin(data[i]))
-                # print("Right Finger, 1st:{}, 2nd:{},".format(Rj[0,0]*180/np.pi,Rj[1,0]*180/np.pi))
-                # print("Left Finger, 1st:{}, 2nd:{},".format(Lj[0,0]*180/np.pi,Lj[1,0]*180/np.pi))
-                time.sleep(0.001)
+            emergency = False
+            
+            Re1 = enc_Rj1.read()
+            Re2 = enc_Rj2.read()
+            Le1 = enc_Lj1.read()
+            Le2 = enc_Lj2.read()
+            
+            f_sensor = 5.1203 * sen_f.read() - 5.2506
+            e_sensor = (((sen_e.read()) - (f_sensor / 100.0 * 0.15)) -2.9440)/0.0148
+            
+            Rj = self.R_j_inv * self.R_e * np.array([[Re1-self.offset[0]],[-Re2+self.offset[1]]]) * np.pi/180.0
+            Lj = self.R_j_inv_L * self.R_e * np.array([[Le1-self.offset[2]],[Le2-self.offset[3]]]) * np.pi/180.0
+            
+            Prev_Rj = Rj
+            Prev_Lj = Lj
+            
+            xR = self.L1 * np.cos(Rj[0,0] + np.pi/2.0) + self.L2 * np.cos(Rj[0,0]-Rj[1,0] + np.pi/2.0)
+            yR = self.L1 * np.sin(Rj[0,0] + np.pi/2.0) + self.L2 * np.sin(Rj[0,0]-Rj[1,0] + np.pi/2.0)
+            xL = self.L1 * np.cos(Lj[0,0] + np.pi/2.0) + self.L2 * np.cos(Lj[0,0]+Lj[1,0] + np.pi/2.0)
+            yL = self.L1 * np.sin(Lj[0,0] + np.pi/2.0) + self.L2 * np.sin(Lj[0,0]+Lj[1,0] + np.pi/2.0)
+            
+            P_R = np.array([xR, yR])
+            P_L = np.array([xL, yL])
+            Prel_R = self.Pc_R - P_R
+            Prel_L = self.Pc_L - P_L
+            l_R = np.sqrt(Prel_R[0]*Prel_R[0] + Prel_R[1]*Prel_R[1])
+            l_L = np.sqrt(Prel_L[0]*Prel_L[0] + Prel_L[1]*Prel_L[1])
+            p_R = np.array([[l_R],[np.arctan2(-Prel_R[1],-Prel_R[0])]])
+            p_L = np.array([[l_L],[np.arctan2(Prel_L[1],Prel_L[0])]])
+            
             for t in range(self.T):
                 policy_output = self.policy.get_actions(
                     o, ag, self.g,
@@ -117,18 +254,11 @@ class RolloutWorker:
                     random_eps=self.random_eps if not self.exploit else 0.,
                     use_target_net=self.use_target_net)
     
-                
-    
                 if self.compute_Q:
                     u, Q = policy_output
                     Qs.append(Q)
-                    # Fs.append(np.abs(np.float32((o[:,11:13] * (o[:,11:13] < 0.0)).sum(axis=-1))).mean())
-                    # Fs.append(np.abs(np.float32(o[:,13] * (o[:,13] > 0.0))).mean())
-                    # if np.abs(np.float32([e.env.prev_oforce for e in self.venv.envs])).mean() > 5.0: 
-                    Fs.append(np.abs(np.float32([e.env.prev_oforce for e in self.venv.envs])).mean())
-                    # Ks.append(np.abs(np.float32(o[:,13].sum(axis=-1))).mean())
-                    # Ks.append(0.5)
-                    Ks.append(np.abs(np.float32(o[:,14].sum(axis=-1))).mean())
+                    Fs.append(f_sensor)
+                    Ks.append(self.stiffness)
                 else:
                     u = policy_output
                 if u.ndim == 1:
@@ -140,22 +270,102 @@ class RolloutWorker:
                 success = np.zeros(self.rollout_batch_size)
                 success2 = np.zeros(self.rollout_batch_size)
                 
-                # success3 = np.zeros(self.rollout_batch_size)
                 # compute new states and observations
-                obs_dict_new, _, done, info = self.venv.step(u)
-                # self.venv.render()
+                self.stiffness_lim = np.clip(self.stiffness_lim + 0.2 * u[0][5], 0.1, 1.0)
+                self.stiffness = np.clip(self.stiffness + 0.2 * u[0][4], 0, self.stiffness_lim)
+                
+                if emergency == False:
+                    vel_R = Rj - Prev_Rj
+                    vel_L = Lj - Prev_Lj
+                    if vel_R[0,0] > self.vel_limit or vel_R[0,0] < -self.vel_limit or vel_R[1,0] > self.vel_limit or vel_R[1,0] < -self.vel_limit or vel_L[0,0] > self.vel_limit or vel_L[0,0] < -self.vel_limit or vel_L[1,0] > self.vel_limit or vel_L[1,0] < -0.1:
+                        emergency = True
+                        r = np.array([[0.0], [0.0]])
+                        print("***************Robot going insane! Safety on!***************")
+                    else:
+                        r = self.stiffness * 0.9
+                else:
+                    r = np.array([[0.0], [0.0]])
+                
+                des_p_R = np.array([[np.min([np.max([p_R[0,0] + u[0][0]/14.0, -self.l_limit]), self.l_limit])], [np.min([np.max([p_R[1,0] + u[0][1]/2.0, -self.th_limit]), self.th_limit])]])
+                des_p_L = np.array([[np.min([np.max([p_L[0,0] + u[0][2]/14.0, -self.l_limit]), self.l_limit])], [np.min([np.max([p_L[1,0] + u[0][3]/2.0, -self.th_limit]), self.th_limit])]])
+                
+                Jp_R = np.matrix([[-Prel_R[0]/l_R, -Prel_R[1]/l_R],[Prel_R[1]/l_R/l_R, -Prel_R[0]/l_R/l_R]])
+                Jp_L = np.matrix([[-Prel_L[0]/l_L, -Prel_L[1]/l_L],[Prel_L[1]/l_L/l_L, -Prel_L[0]/l_L/l_L]])
+                Jp_inv_R = np.matrix([[Jp_R[1,1] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0]), -Jp_R[0,1] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0])], [-Jp_R[1,0] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0]), Jp_R[0,0] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0])]])
+                Jp_inv_L = np.matrix([[Jp_L[1,1] / (Jp_L[0,0]*Jp_L[1,1] - Jp_L[0,1]*Jp_L[1,0]), -Jp_L[0,1] / (Jp_L[0,0]*Jp_L[1,1] - Jp_L[0,1]*Jp_L[1,0])], [-Jp_L[1,0] / (Jp_L[0,0]*Jp_L[1,1] - Jp_L[0,1]*Jp_L[1,0]), Jp_L[0,0] / (Jp_L[0,0]*Jp_L[1,1] - Jp_L[0,1]*Jp_L[1,0])]])
+                J_R = np.matrix([[-yR, self.L2 * np.cos(Rj[0,0]-Rj[1,0])], 
+                                 [xR, self.L2 * np.sin(Rj[0,0]-Rj[1,0])]])
+                J_L = np.matrix([[-yL, -self.L2 * np.cos(Lj[0,0]+Lj[1,0])], 
+                                 [xL, -self.L2 * np.sin(Lj[0,0]+Lj[1,0])]])
+                J_inv_R = np.matrix([[J_R[1,1] / (J_R[0,0]*J_R[1,1] - J_R[0,1]*J_R[1,0]), -J_R[0,1] / (J_R[0,0]*J_R[1,1] - J_R[0,1]*J_R[1,0])], [-J_R[1,0] / (J_R[0,0]*J_R[1,1] - J_R[0,1]*J_R[1,0]), J_R[0,0] / (J_R[0,0]*J_R[1,1] - J_R[0,1]*J_R[1,0])]])
+                J_inv_L = np.matrix([[J_L[1,1] / (J_L[0,0]*J_L[1,1] - J_L[0,1]*J_L[1,0]), -J_L[0,1] / (J_L[0,0]*J_L[1,1] - J_L[0,1]*J_L[1,0])], [-J_L[1,0] / (J_L[0,0]*J_L[1,1] - J_L[0,1]*J_L[1,0]), J_L[0,0] / (J_L[0,0]*J_L[1,1] - J_L[0,1]*J_L[1,0])]])
+                
+                max_kj_R = np.transpose(self.R_j) * np.matrix([[2*self.Ksc, 0],[0, 2*self.Ksc]]) * self.R_j
+                max_kj_L = np.transpose(self.R_j_L) * np.matrix([[2*self.Ksc, 0],[0, 2*self.Ksc]]) * self.R_j_L
+                max_k_R = np.transpose(J_inv_R) * max_kj_R * J_inv_R
+                max_k_L = np.transpose(J_inv_L) * max_kj_L * J_inv_L
+                max_kp_R = np.transpose(Jp_inv_R) * max_k_R * Jp_inv_R
+                max_kp_L = np.transpose(Jp_inv_L) * max_k_L * Jp_inv_L
+                des_Fp_R = max_kp_R * (r * (des_p_R - p_R))
+                des_Fp_L = max_kp_L * (r * (des_p_L - p_L))
+                des_F_R = np.transpose(Jp_R) * des_Fp_R
+                des_F_L = np.transpose(Jp_L) * des_Fp_L
+                des_tau_R = np.transpose(J_R) * des_F_R
+                des_tau_L = np.transpose(J_L) * des_F_L
+                des_mR = (np.transpose(self.R_j_inv)*des_tau_R / (2*self.Ksc) + self.R_j * Rj) / self.Rm 
+                des_mL = (np.transpose(self.R_j_inv_L)*des_tau_L / (2*self.Ksc) + self.R_j_L * Lj) / self.Rm
+                
+                # act_Rj1.write(np.min([np.max([des_mR[0,0] * 180.0 / np.pi * 0.117258, -10.0]),10.0]))
+                # act_Rj2.write(np.min([np.max([des_mR[1,0] * 180.0 / np.pi * 0.117541, -10.0]),10.0]))
+                # act_Lj1.write(np.min([np.max([des_mL[0,0] * 180.0 / np.pi * 0.117729, -10.0]),10.0]))
+                # act_Lj2.write(np.min([np.max([des_mL[1,0] * 180.0 / np.pi * 0.117679, -10.0]),10.0]))
+                
+                time.sleep(0.004)
+                
+                Re1 = enc_Rj1.read()
+                Re2 = enc_Rj2.read()
+                Le1 = enc_Lj1.read()
+                Le2 = enc_Lj2.read()
+                f_sensor = 5.1203 * sen_f.read() - 5.2506
+                e_sensor = (((sen_e.read()) - (f_sensor / 100.0 * 0.15)) -2.9440)/0.0148
+                
+                Prev_Rj = Rj
+                Prev_Lj = Lj
+                
+                Rj = self.R_j_inv * self.R_e * np.array([[Re1-self.offset[0]],[-Re2+self.offset[1]]]) * np.pi/180.0
+                Lj = self.R_j_inv_L * self.R_e * np.array([[Le1-self.offset[2]],[Le2-self.offset[3]]]) * np.pi/180.0
+                
+                xR = self.L1 * np.cos(Rj[0,0] + np.pi/2.0) + self.L2 * np.cos(Rj[0,0]-Rj[1,0] + np.pi/2.0)
+                yR = self.L1 * np.sin(Rj[0,0] + np.pi/2.0) + self.L2 * np.sin(Rj[0,0]-Rj[1,0] + np.pi/2.0)
+                xL = self.L1 * np.cos(Lj[0,0] + np.pi/2.0) + self.L2 * np.cos(Lj[0,0]+Lj[1,0] + np.pi/2.0)
+                yL = self.L1 * np.sin(Lj[0,0] + np.pi/2.0) + self.L2 * np.sin(Lj[0,0]+Lj[1,0] + np.pi/2.0)
+                
+                P_R = np.array([xR, yR])
+                P_L = np.array([xL, yL])
+                Prel_R = self.Pc_R - P_R
+                Prel_L = self.Pc_L - P_L
+                l_R = np.sqrt(Prel_R[0]*Prel_R[0] + Prel_R[1]*Prel_R[1])
+                l_L = np.sqrt(Prel_L[0]*Prel_L[0] + Prel_L[1]*Prel_L[1])
+                p_R = np.array([[l_R],[np.arctan2(-Prel_R[1],-Prel_R[0])]])
+                p_L = np.array([[l_L],[np.arctan2(Prel_L[1],Prel_L[0])]])
+                
+                observation = np.array([[p_R[0,0] * 10 - 1.0, p_L[0,0] * 10 - 1.0, p_R[1,0], p_L[1,0], 
+                                              ((e_sensor -2.9440)/0.0148* np.pi / 180.0 - p_R[1,0]) , ((e_sensor -2.9440)/0.0148* np.pi / 180.0 - p_L[1,0]), 
+                                              (self.g[0][0] - (e_sensor -2.9440)/0.0148 * np.pi / 180.0),
+                                              des_Fp_R[0,0] * 0.1, des_Fp_L[0,0] * 0.1, 
+                                              self.stiffness, self.stiffness_lim]])
+                
+                obs_dict_new = dict(observation=observation, 
+                                    achieved_goal=np.array([[((e_sensor -2.9440)/0.0148) * np.pi / 180.0, des_Fp_R[0,0] * 0.1, des_Fp_L[0,0] * 0.1]]), 
+                                    desired_goal = self.g)
+                done = [False] if t < self.T-1 else [True]
+                info = [{
+                    'is_success': self._is_success(obs_dict_new['achieved_goal'][0], obs_dict_new['desired_goal'][0]),
+                }]
                 o_new = obs_dict_new['observation']
                 ag_new = obs_dict_new['achieved_goal']
                 success = np.array([i.get('is_success', 0.0) for i in info])
-                # success2 = (np.float32(o[:,11:13].sum(axis=-1))*1000.0 > -147.15/3*6)
-                success2 = (np.float32(self.venv.envs[0].env.prev_oforce < self.venv.envs[0].env.object_fragility))
-                
-    #            success2 = np.float32(o[:,13] == 0.0)
-    
-                # success2 = (np.linalg.norm(o[:,-9:-6],axis=-1)) < 0.05
-                # success3 = (np.linalg.norm(o[:,-6:-3],axis=-1)) < 0.05
-                
-    #            print(o_new[0,-4:])
+                success2 = (np.float32(f_sensor < self.object_fragility))
     
                 if any(done):
                     # here we assume all environments are done is ~same number of steps, so we terminate rollouts whenever any of the envs returns done
@@ -165,18 +375,24 @@ class RolloutWorker:
     
                 for i, info_dict in enumerate(info):
                     for idx, key in enumerate(self.info_keys):
+                        # print(info_values[idx][t, i])
+                        # print(info[i][key])
+                        # print(info_values)
+                        # print(info)
                         info_values[idx][t, i] = info[i][key]
     
-                if np.isnan(o_new).any():
-                    self.logger.warn('NaN caught during rollout generation. Trying again...')
-                    self.reset_all_rollouts()
-                    return self.generate_rollouts()
+                # if np.isnan(o_new).any():
+                #     self.logger.warn('NaN caught during rollout generation. Trying again...')
+                #     self.reset_all_rollouts()
+                #     return self.generate_rollouts()
     
                 dones.append(done)
                 obs.append(o.copy())
                 achieved_goals.append(ag.copy())
                 successes.append(success.copy())
                 successes2.append(success2.copy())
+                # print(o.copy())
+                # print(o_new)
                 
                 # successes3.append(success3.copy())
                 acts.append(u.copy())
@@ -197,12 +413,9 @@ class RolloutWorker:
             # stats
             successful = np.array(successes)[-1, :]
             successful2 = np.array(successes2)
-            # successful3 = np.array(successes3)
-    #        successful2 = np.array(successes2)[-1, :]
             assert successful.shape == (self.rollout_batch_size,)
             success_rate = np.mean(successful)
             success_rate2 = np.mean(successful2.mean(axis=0))
-            # success_rate3 = np.mean(successful3.mean(axis=0))
             success_rate3 = np.mean(successful2.min(axis=0) * successful)
             self.success_history.append(success_rate)
             self.success_history2.append(success_rate2)
@@ -252,4 +465,7 @@ class RolloutWorker:
             return [(prefix + '/' + key, val) for key, val in logs]
         else:
             return logs
+        
+    def _is_success(self, ag, g):
+        return (np.linalg.norm(ag - g, axis=-1) < np.pi/16.0).astype(np.float32)
 

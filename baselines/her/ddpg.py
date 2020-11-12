@@ -72,7 +72,11 @@ class DDPG(object):
         self.dimg = self.input_dims['g']
         self.dimu = self.input_dims['u']
         
-        self.remove_demo = 0
+        self.success_rate = 0
+        self.success_ref = 0.85
+        self.stats_qf = []
+        
+        # self.bc_loss = tf.Variable(1.0)
 
         # Prepare staging area for feeding data to the model.
         stage_shapes = OrderedDict()
@@ -180,6 +184,8 @@ class DDPG(object):
         demo_data_obs = demoData['obs']
         demo_data_acs = demoData['acs']
         demo_data_info = demoData['info']
+        # print(info_keys)
+        # print(demo_data_info[0][0])
 
         for epsd in range(self.num_demo): # we initialize the whole demo buffer at the start of the training
             obs, acts, goals, achieved_goals = [], [] ,[] ,[]
@@ -262,13 +268,14 @@ class DDPG(object):
 
     def _grads(self):
         # Avoid feed_dict here for performance!
-        critic_loss, actor_loss, Q_grad, pi_grad  = self.sess.run([
+        critic_loss, actor_loss, Q_grad, pi_grad, mask  = self.sess.run([
             self.Q_loss_tf,
             self.main.Q_pi_tf,
             self.Q_grad_tf,
-            self.pi_grad_tf,])
+            self.pi_grad_tf,
+            self.maskMain])
 #        ], feed_dict={self.w_loss: np.tanh((1.0 - self.n_epoch) * 2.0)})
-        return critic_loss, actor_loss, Q_grad, pi_grad
+        return critic_loss, actor_loss, Q_grad, pi_grad, mask
 
     def _update(self, Q_grad, pi_grad):
         self.Q_adam.update(Q_grad, self.Q_lr)
@@ -278,13 +285,22 @@ class DDPG(object):
         
         if self.bc_loss: #use demonstration buffer to sample as well if bc_loss flag is set TRUE
             transitions =  self.buffer.sample(self.batch_size - self.demo_batch_size) #if self.n_epoch < 50 else self.buffer.sample(self.batch_size - np.int(self.demo_batch_size * np.power(0.99, self.n_epoch - 50)))
-            global DEMO_BUFFER
-            transitions_demo = DEMO_BUFFER.sample(self.demo_batch_size) #if self.n_epoch < 50 else DEMO_BUFFER.sample(np.int(self.demo_batch_size * np.power(0.99, self.n_epoch - 50))) #sample from the demo buffer
-            for k, values in transitions_demo.items():
-                rolloutV = transitions[k].tolist()
-                for v in values:
-                    rolloutV.append(v.tolist())
-                transitions[k] = np.array(rolloutV)
+            num_self_imitation = (self.demo_batch_size *(np.tanh((self.success_rate-self.success_ref)*50.0)+1.0)/2.0).astype(np.int) if self.success_rate - self.success_ref < 0.05 else self.demo_batch_size
+            if num_self_imitation > 0:
+                transitions_demo_self = self.buffer.sample(num_self_imitation)
+                for k, values in transitions_demo_self.items():
+                    rolloutV = transitions[k].tolist()
+                    for v in values:
+                        rolloutV.append(v.tolist())
+                    transitions[k] = np.array(rolloutV)
+            if self.demo_batch_size > num_self_imitation:
+                global DEMO_BUFFER
+                transitions_demo = DEMO_BUFFER.sample(self.demo_batch_size - num_self_imitation)
+                for k, values in transitions_demo.items():
+                    rolloutV = transitions[k].tolist()
+                    for v in values:
+                        rolloutV.append(v.tolist())
+                    transitions[k] = np.array(rolloutV)
         else:
             transitions = self.buffer.sample(self.batch_size) #otherwise only sample from primary buffer
 
@@ -303,12 +319,14 @@ class DDPG(object):
         self.sess.run(self.stage_op, feed_dict=dict(zip(self.buffer_ph_tf, batch)))
 
     def train(self, stage=True):
-        if self.bc_loss and self.remove_demo:
-            global DEMO_BUFFER
-            DEMO_BUFFER = self.buffer
+        # if self.bc_loss and (self.success_rate > self.success_ref):
+        #     global DEMO_BUFFER
+        #     DEMO_BUFFER = self.buffer
         if stage:
             self.stage_batch()
-        critic_loss, actor_loss, Q_grad, pi_grad = self._grads()
+        critic_loss, actor_loss, Q_grad, pi_grad, mask = self._grads()
+        self.stats_qf.append(np.sum(mask)/self.demo_batch_size)
+        # print("Success rate: {}, Mask: {}, How many of them are better than policy: {}".format(self.success_rate,mask,np.sum(mask)))
         self._update(Q_grad, pi_grad)
         return critic_loss, actor_loss
 
@@ -376,14 +394,15 @@ class DDPG(object):
         self.Q_loss_tf = tf.reduce_mean(tf.square(tf.stop_gradient(target_tf) - self.main.Q_tf))
 
         if self.bc_loss ==1 and self.q_filter == 1 : # train with demonstrations and use bc_loss and q_filter both
-            maskMain = tf.reshape(tf.boolean_mask(self.main.Q_tf > self.main.Q_pi_tf, mask), [-1]) #where is the demonstrator action better than actor action according to the critic? choose those samples only
+            self.maskMain = tf.reshape(tf.boolean_mask(self.main.Q_tf > self.main.Q_pi_tf, mask), [-1]) #where is the demonstrator action better than actor action according to the critic? choose those samples only
             #define the cloning loss on the actor's actions only on the samples which adhere to the above masks
-            self.cloning_loss_tf = tf.reduce_sum(tf.square(tf.boolean_mask(tf.boolean_mask((self.main.pi_tf), mask), maskMain, axis=0) - tf.boolean_mask(tf.boolean_mask((batch_tf['u']), mask), maskMain, axis=0)))
+            self.cloning_loss_tf = tf.reduce_sum(tf.square(tf.boolean_mask(tf.boolean_mask((self.main.pi_tf), mask), self.maskMain, axis=0) - tf.boolean_mask(tf.boolean_mask((batch_tf['u']), mask), self.maskMain, axis=0)))
             self.pi_loss_tf = -self.prm_loss_weight * tf.reduce_mean(self.main.Q_pi_tf) #primary loss scaled by it's respective weight prm_loss_weight
             self.pi_loss_tf += self.prm_loss_weight * self.action_l2 * tf.reduce_mean(tf.square(self.main.pi_tf / self.max_u)) #L2 loss on action values scaled by the same weight prm_loss_weight
             self.pi_loss_tf += self.aux_loss_weight * self.cloning_loss_tf #* self.w_loss #adding the cloning loss to the actor loss as an auxilliary loss scaled by its weight aux_loss_weight
 
         elif self.bc_loss == 1 and self.q_filter == 0: # train with demonstrations without q_filter
+            self.maskMain = tf.constant([0.0])
             self.cloning_loss_tf = tf.reduce_sum(tf.square(tf.boolean_mask((self.main.pi_tf), mask) - tf.boolean_mask((batch_tf['u']), mask)))
             self.pi_loss_tf = -self.prm_loss_weight * tf.reduce_mean(self.main.Q_pi_tf)
             self.pi_loss_tf += self.prm_loss_weight * self.action_l2 * tf.reduce_mean(tf.square(self.main.pi_tf / self.max_u))
@@ -469,6 +488,8 @@ class DDPG(object):
         logs += [('stats_o/std', np.mean(self.sess.run([self.o_stats.std])))]
         logs += [('stats_g/mean', np.mean(self.sess.run([self.g_stats.mean])))]
         logs += [('stats_g/std', np.mean(self.sess.run([self.g_stats.std])))]
+        logs += [('stats_qf', np.mean(self.stats_qf))]
+        self.stats_qf = []
         # print('stats_o/mean: {}'.format(self.sess.run([self.o_stats.mean])))
         # print('stats_o/std: {}'.format(self.sess.run([self.o_stats.std])))
 

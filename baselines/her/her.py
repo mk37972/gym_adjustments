@@ -11,6 +11,7 @@ import tensorflow as tf
 from baselines.common.mpi_moments import mpi_moments
 
 from baselines.her.rollout import RolloutWorker
+from baselines.her.rollout_NuFingers import RolloutWorker as RolloutNuFingers
 
 import baselines.her.experiment.config as config
 
@@ -59,12 +60,10 @@ def train(*, policy, rollout_worker, evaluator,
             avg = mpi_average(val)
             logger.record_tabular(key, avg)
             if key == 'test/success_rate3':
-                if avg > 0.90: policy.remove_demo = 1
+                policy.success_rate = avg
         for key, val in rollout_worker.logs('train'):
             avg = mpi_average(val)
             logger.record_tabular(key, avg)
-            # if key == 'train/success_rate':
-            #     if avg > 0.65: policy.remove_demo = 1
         for key, val in policy.logs():
             logger.record_tabular(key, mpi_average(val))
 
@@ -160,11 +159,14 @@ def learn(*, network, env, total_timesteps,
         'perturb':  kwargs['pert_type'],
         'n_actions':  kwargs['n_actions'],
     }
-    env_name = env.spec.id
-    params['env_name'] = env_name
     params['replay_strategy'] = replay_strategy
-    if env_name in config.DEFAULT_ENV_PARAMS:
-        params.update(config.DEFAULT_ENV_PARAMS[env_name])  # merge env-specific parameters in
+    if env is not None:
+        env_name = env.spec.id
+        params['env_name'] = env_name
+        if env_name in config.DEFAULT_ENV_PARAMS:
+            params.update(config.DEFAULT_ENV_PARAMS[env_name])  # merge env-specific parameters in
+    else:
+        params['env_name'] = 'NuFingers_Experiment'
     params.update(**override_params)  # makes it possible to override any parameter
     with open(os.path.join(logger.get_dir(), 'params.json'), 'w') as f:
         json.dump(params, f)
@@ -173,11 +175,11 @@ def learn(*, network, env, total_timesteps,
         params['bc_loss'] = 1
         params['q_filter'] = 1
         params['n_cycles'] = 20
-        # params['random_eps'] = 0.1
-        # params['noise_eps'] = 0.1
+        params['random_eps'] = 0.1 # chip: ON
+        params['noise_eps'] = 0.1 # chip: ON
         # params['batch_size']: 1024
     params = config.prepare_params(params)
-    params['rollout_batch_size'] = env.num_envs
+    params['rollout_batch_size'] = 1
     params.update(kwargs)
 
     config.log_params(params, logger=logger)
@@ -194,7 +196,13 @@ def learn(*, network, env, total_timesteps,
         logger.warn('****************')
         logger.warn()
 
-    dims = config.configure_dims(params)
+    if env is not None:
+        dims = config.configure_dims(params)
+    else:
+        dims = dict(o = 11,
+                    u = 6,
+                    g = 3,
+                    info_is_success = 1)
     policy = config.configure_ddpg(dims=dims, params=params, clip_return=clip_return)
     if load_path is not None:
         tf_util.load_variables(load_path)
@@ -222,9 +230,16 @@ def learn(*, network, env, total_timesteps,
     
     eval_env = eval_env or env
 
-    print("NAME={}".format(env))
-    rollout_worker = RolloutWorker(env, policy, dims, logger, monitor=True, **rollout_params)
-    evaluator = RolloutWorker(eval_env, policy, dims, logger, **eval_params)
+    print("NAME={}".format(params['env_name']))
+    
+    print(rollout_params)
+    
+    if params['env_name'].find('NuFingers') == -1:
+        rollout_worker = RolloutWorker(env, policy, dims, logger, monitor=True, **rollout_params)
+        evaluator = RolloutWorker(eval_env, policy, dims, logger, **eval_params)
+    else:
+        rollout_worker = RolloutNuFingers(policy, dims, logger, monitor=True, **rollout_params)
+        evaluator = RolloutNuFingers(policy, dims, logger, **eval_params)
 
     n_cycles = params['n_cycles']
     n_epochs = total_timesteps // n_cycles // rollout_worker.T // rollout_worker.rollout_batch_size

@@ -72,33 +72,37 @@ def cached_make_env(make_env):
 
 def prepare_params(kwargs):
     # DDPG params
-    ddpg_params = dict()
-    env_name = kwargs['env_name']
     env_kwargs = dict(pert_type=kwargs['perturb'], n_actions=kwargs['n_actions'])
-
-    def make_env(subrank=None):
-        env = gym.make(env_name, **env_kwargs)
-        if subrank is not None and logger.get_dir() is not None:
-            try:
-                from mpi4py import MPI
-                mpi_rank = MPI.COMM_WORLD.Get_rank()
-            except ImportError:
-                MPI = None
-                mpi_rank = 0
-                logger.warn('Running with a single MPI process. This should work, but the results may differ from the ones publshed in Plappert et al.')
-
-            max_episode_steps = env._max_episode_steps
-            env =  Monitor(env,
-                           os.path.join(logger.get_dir(), str(mpi_rank) + '.' + str(subrank)),
-                           allow_early_resets=True)
-            # hack to re-expose _max_episode_steps (ideally should replace reliance on it downstream)
-            env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_steps)
-        return env
-
-    kwargs['make_env'] = make_env
-    tmp_env = cached_make_env(kwargs['make_env'])
-    assert hasattr(tmp_env, '_max_episode_steps')
-    kwargs['T'] = tmp_env._max_episode_steps
+    ddpg_params = dict()
+    
+    try:
+        env_name = kwargs['env_name']
+        
+        def make_env(subrank=None):
+            env = gym.make(env_name, **env_kwargs)
+            if subrank is not None and logger.get_dir() is not None:
+                try:
+                    from mpi4py import MPI
+                    mpi_rank = MPI.COMM_WORLD.Get_rank()
+                except ImportError:
+                    MPI = None
+                    mpi_rank = 0
+                    logger.warn('Running with a single MPI process. This should work, but the results may differ from the ones publshed in Plappert et al.')
+    
+                max_episode_steps = env._max_episode_steps
+                env =  Monitor(env,
+                               os.path.join(logger.get_dir(), str(mpi_rank) + '.' + str(subrank)),
+                               allow_early_resets=True)
+                # hack to re-expose _max_episode_steps (ideally should replace reliance on it downstream)
+                env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_steps)
+            return env
+    
+        kwargs['make_env'] = make_env
+        tmp_env = cached_make_env(kwargs['make_env'])
+        assert hasattr(tmp_env, '_max_episode_steps')
+        kwargs['T'] = tmp_env._max_episode_steps
+    except:
+        kwargs['T'] = 200
 
     kwargs['max_u'] = np.array(kwargs['max_u']) if isinstance(kwargs['max_u'], list) else kwargs['max_u']
     kwargs['gamma'] = 1. - 1. / kwargs['T']
@@ -127,11 +131,26 @@ def log_params(params, logger=logger):
 
 
 def configure_her(params):
-    env = cached_make_env(params['make_env'])
-    env.reset()
-
-    def reward_fun(ag_2, g, info):  # vectorized
-        return env.compute_reward(achieved_goal=ag_2, desired_goal=g, info=info)
+    try:
+        env = cached_make_env(params['make_env'])
+        env.reset()
+    
+        def reward_fun(ag_2, g, info):  # vectorized
+            return env.compute_reward(achieved_goal=ag_2, desired_goal=g, info=info)
+    except:
+        def reward_fun(ag_2, g, info):  # vectorized
+            achieved_goal=ag_2
+            desired_goal=g
+            info=info
+            
+            try: 
+                d = np.linalg.norm(achieved_goal[:,0] - desired_goal[:,0], axis=-1)
+                fragile_goal = np.linalg.norm((achieved_goal[:,1:] - desired_goal[:,1:])*((achieved_goal[:,1:] - desired_goal[:,1:]) < 0), axis=-1)
+            except:
+                d = np.linalg.norm(achieved_goal[0] - desired_goal[0], axis=-1)
+                fragile_goal = np.linalg.norm((achieved_goal[1:] - desired_goal[1:])*((achieved_goal[1:] - desired_goal[1:]) < 0), axis=-1)
+            return -(d > np.pi/16).astype(np.float32) - np.float32(fragile_goal) * 2.0
+            
 
     # Prepare configuration for HER.
     her_params = {
@@ -161,8 +180,8 @@ def configure_ddpg(dims, params, reuse=False, use_mpi=True, clip_return=True):
     input_dims = dims.copy()
 
     # DDPG agent
-    env = cached_make_env(params['make_env'])
-    env.reset()
+    # env = cached_make_env(params['make_env'])
+    # env.reset()
     ddpg_params.update({'input_dims': input_dims,  # agent takes an input observations
                         'T': params['T'],
                         'clip_pos_returns': True,  # clip positive returns
