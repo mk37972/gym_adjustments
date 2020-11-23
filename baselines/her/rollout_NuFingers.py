@@ -57,8 +57,8 @@ class RolloutWorker:
         
         self.Rm = 0.0285
                         
-        self.Pc_R = np.array([-0.0635, 0.121])
-        self.Pc_L = np.array([0.0635, 0.121])
+        self.Pc_R = np.array([-0.0635, 0.127])
+        self.Pc_L = np.array([0.0635, 0.127])
         self.max_kj_R = np.transpose(self.R_j) * np.matrix([[2*self.Ksc, 0],[0, 2*self.Ksc]]) * self.R_j
         self.max_kj_L = np.transpose(self.R_j_L) * np.matrix([[2*self.Ksc, 0],[0, 2*self.Ksc]]) * self.R_j_L
         
@@ -68,14 +68,14 @@ class RolloutWorker:
         self.l_limit = 0.15
         self.th_limit = np.pi/4.0
         
-        self.l_step_limit = 0.08
+        self.l_step_limit = 0.04
         self.th_step_limit = np.pi/8.0
         
-        self.vel_limit = 0.12
+        self.vel_limit = 0.15
         
         self.object_fragility = 3.5
         
-        self.offset = np.array([56.447998046875,124.36520385742188,431.27996826171875,-669.9900512695312])
+        self.offset = np.array([-209.23199462890625,-78.2226333618164,420.8399963378906,-1661.9674072265625])
 
         self.n_episodes = 0
         self.reset_all_rollouts()
@@ -103,7 +103,7 @@ class RolloutWorker:
             des_p_R = np.array([des_p[0]/2.0, des_p[1]])
             des_p_L = des_p_R
             
-            r = 0.3*np.array([[1.0], [1.0]])
+            r = np.array([[0.5*1.0], [1.0]])
             
             new_goal = np.random.random()*np.pi/3.0 - np.pi/9.0
             
@@ -133,6 +133,13 @@ class RolloutWorker:
                 p_R = np.array([[l_R],[np.arctan2(-Prel_R[1],-Prel_R[0])]])
                 p_L = np.array([[l_L],[np.arctan2(Prel_L[1],Prel_L[0])]])
                 
+                change_l_R = np.clip(des_l - p_R[0,0], -self.l_step_limit, self.l_step_limit)
+                change_th_R = np.clip(des_th - p_R[1,0], -8.0*self.th_step_limit, self.th_step_limit)
+                change_l_L = np.clip(des_l - p_L[0,0], -self.l_step_limit, self.l_step_limit)
+                change_th_L = np.clip(des_th - p_L[1,0], -8.0*self.th_step_limit, self.th_step_limit)
+                des_p_R = np.array([[np.min([np.max([p_R[0,0] + change_l_R, -self.l_limit/2.0]), self.l_limit/2.0])], [np.min([np.max([p_R[1,0] + change_th_R, -self.th_limit]), self.th_limit])]])
+                des_p_L = np.array([[np.min([np.max([p_L[0,0] + change_l_L, -self.l_limit/2.0]), self.l_limit/2.0])], [np.min([np.max([p_L[1,0] + change_th_L, -self.th_limit]), self.th_limit])]])
+                
                 Jp_R = np.matrix([[-Prel_R[0]/l_R, -Prel_R[1]/l_R],[Prel_R[1]/l_R/l_R, -Prel_R[0]/l_R/l_R]])
                 Jp_L = np.matrix([[-Prel_L[0]/l_L, -Prel_L[1]/l_L],[Prel_L[1]/l_L/l_L, -Prel_L[0]/l_L/l_L]])
                 Jp_inv_R = np.matrix([[Jp_R[1,1] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0]), -Jp_R[0,1] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0])], [-Jp_R[1,0] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0]), Jp_R[0,0] / (Jp_R[0,0]*Jp_R[1,1] - Jp_R[0,1]*Jp_R[1,0])]])
@@ -148,20 +155,27 @@ class RolloutWorker:
                 max_k_L = np.transpose(J_inv_L) * self.max_kj_L * J_inv_L
                 max_kp_R = np.transpose(Jp_inv_R) * max_k_R * Jp_inv_R
                 max_kp_L = np.transpose(Jp_inv_L) * max_k_L * Jp_inv_L
+                max_kp_R[0,1] = 0.0
+                max_kp_R[1,0] = 0.0
+                max_kp_L[0,1] = 0.0
+                max_kp_L[1,0] = 0.0
                 des_Fp_R = max_kp_R * (r * (des_p_R - p_R))
                 des_Fp_L = max_kp_L * (r * (des_p_L - p_L))
+                
                 des_F_R = np.transpose(Jp_R) * des_Fp_R
                 des_F_L = np.transpose(Jp_L) * des_Fp_L
-                des_tau_R = np.transpose(J_R) * des_F_R
-                des_tau_L = np.transpose(J_L) * des_F_L
+                des_tau_R = np.transpose(J_R) * des_F_R if Rj[1,0] < 0 else np.array([[0.0],[-1.0]])
+                des_tau_L = np.transpose(J_L) * des_F_L if Lj[1,0] < 0 else np.array([[0.0],[-1.0]])
+                des_tau_R = np.clip(des_tau_R, -5., 5.)
+                des_tau_L = np.clip(des_tau_L, -5., 5.)
                 des_mR = (np.transpose(self.R_j_inv)*des_tau_R / (2*self.Ksc) + self.R_j * Rj) / self.Rm 
                 des_mL = (np.transpose(self.R_j_inv_L)*des_tau_L / (2*self.Ksc) + self.R_j_L * Lj) / self.Rm
                 
-                # Position control mode)
-                # act_Rj1.write(np.min([np.max([des_mR[0,0] * 180.0 / np.pi * 0.117258, -10.0]),10.0]))
-                # act_Rj2.write(np.min([np.max([des_mR[1,0] * 180.0 / np.pi * 0.117541, -10.0]),10.0]))
-                # act_Lj1.write(np.min([np.max([des_mL[0,0] * 180.0 / np.pi * 0.117729, -10.0]),10.0]))
-                # act_Lj2.write(np.min([np.max([des_mL[1,0] * 180.0 / np.pi * 0.117679, -10.0]),10.0]))
+                # Position control mode
+                act_Rj1.write(np.min([np.max([des_mR[0,0] * 180.0 / np.pi * 0.117258, -10.0]),10.0]))
+                act_Rj2.write(np.min([np.max([des_mR[1,0] * 180.0 / np.pi * 0.117541, -10.0]),10.0]))
+                act_Lj1.write(np.min([np.max([des_mL[0,0] * 180.0 / np.pi * 0.117729, -10.0]),10.0]))
+                act_Lj2.write(np.min([np.max([des_mL[1,0] * 180.0 / np.pi * 0.117679, -10.0]),10.0]))
                 
                 time.sleep(0.004)
                 
@@ -169,11 +183,12 @@ class RolloutWorker:
                                           ((e_sensor -2.9440)/0.0148* np.pi / 180.0 - p_R[1,0]) , ((e_sensor -2.9440)/0.0148* np.pi / 180.0 - p_L[1,0]), 
                                           (new_goal - (e_sensor -2.9440)/0.0148 * np.pi / 180.0),
                                           des_Fp_R[0,0] * 0.1, des_Fp_L[0,0] * 0.1, 
+                                          0.0, 0.0, 0.0, 0.0,
                                           self.stiffness, self.stiffness_lim]])
         
             self.obs_dict = dict(observation = observation,
-                                 achieved_goal = np.array([[e_sensor * np.pi/ 180.0, des_Fp_R[0,0] * 0.1, des_Fp_L[0,0] * 0.1]]),
-                                 desired_goal = np.array([[new_goal, 0.0, 0.0]]),
+                                 achieved_goal = np.array([[e_sensor * np.pi/ 180.0, 0.0, 0.0, 0.0, 0.0, des_Fp_R[0,0] * 0.1, des_Fp_L[0,0] * 0.1]]),
+                                 desired_goal = np.array([[new_goal, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]),
                                  )
             
             self.initial_o = self.obs_dict['observation']
@@ -246,6 +261,7 @@ class RolloutWorker:
             p_R = np.array([[l_R],[np.arctan2(-Prel_R[1],-Prel_R[0])]])
             p_L = np.array([[l_L],[np.arctan2(Prel_L[1],Prel_L[0])]])
             
+            
             for t in range(self.T):
                 policy_output = self.policy.get_actions(
                     o, ag, self.g,
@@ -271,23 +287,25 @@ class RolloutWorker:
                 success2 = np.zeros(self.rollout_batch_size)
                 
                 # compute new states and observations
-                self.stiffness_lim = np.clip(self.stiffness_lim + 0.2 * u[0][5], 0.1, 1.0)
-                self.stiffness = np.clip(self.stiffness + 0.2 * u[0][4], 0, self.stiffness_lim)
+                self.stiffness_lim = np.clip(self.stiffness_lim + 0.2 * u[0][3], 0.1, 1.0)
+                self.stiffness = np.clip(self.stiffness + 0.2 * u[0][2], 0, self.stiffness_lim)
+                u[0][0] = np.clip(u[0][0], -self.l_step_limit*14.0, self.l_step_limit*14.0)
+                u[0][1] = np.clip(u[0][1], -8.0*self.th_step_limit*2.0, self.th_step_limit*2.0)
                 
                 if emergency == False:
                     vel_R = Rj - Prev_Rj
                     vel_L = Lj - Prev_Lj
-                    if vel_R[0,0] > self.vel_limit or vel_R[0,0] < -self.vel_limit or vel_R[1,0] > self.vel_limit or vel_R[1,0] < -self.vel_limit or vel_L[0,0] > self.vel_limit or vel_L[0,0] < -self.vel_limit or vel_L[1,0] > self.vel_limit or vel_L[1,0] < -0.1:
+                    if vel_R[0,0] > self.vel_limit or vel_R[0,0] < -self.vel_limit or vel_L[0,0] > self.vel_limit or vel_L[0,0] < -self.vel_limit:
                         emergency = True
-                        r = np.array([[0.0], [0.0]])
+                        r = np.array([[self.stiffness], [1.0]]) * 0.5
                         print("***************Robot going insane! Safety on!***************")
                     else:
-                        r = self.stiffness * 0.9
+                        r = np.array([[self.stiffness], [1.0]])
                 else:
-                    r = np.array([[0.0], [0.0]])
+                    r = np.array([[self.stiffness], [1.0]]) * 0.5
                 
-                des_p_R = np.array([[np.min([np.max([p_R[0,0] + u[0][0]/14.0, -self.l_limit]), self.l_limit])], [np.min([np.max([p_R[1,0] + u[0][1]/2.0, -self.th_limit]), self.th_limit])]])
-                des_p_L = np.array([[np.min([np.max([p_L[0,0] + u[0][2]/14.0, -self.l_limit]), self.l_limit])], [np.min([np.max([p_L[1,0] + u[0][3]/2.0, -self.th_limit]), self.th_limit])]])
+                des_p_R = np.array([[np.min([np.max([p_R[0,0] + u[0][0]/14.0, -self.l_limit/2.0]), self.l_limit/4.0])], [np.min([np.max([p_R[1,0] + u[0][1]/2.0, -self.th_limit]), self.th_limit])]])
+                des_p_L = np.array([[np.min([np.max([p_L[0,0] + u[0][0]/14.0, -self.l_limit/2.0]), self.l_limit/4.0])], [np.min([np.max([p_L[1,0] + u[0][1]/2.0, -self.th_limit]), self.th_limit])]])
                 
                 Jp_R = np.matrix([[-Prel_R[0]/l_R, -Prel_R[1]/l_R],[Prel_R[1]/l_R/l_R, -Prel_R[0]/l_R/l_R]])
                 Jp_L = np.matrix([[-Prel_L[0]/l_L, -Prel_L[1]/l_L],[Prel_L[1]/l_L/l_L, -Prel_L[0]/l_L/l_L]])
@@ -306,19 +324,34 @@ class RolloutWorker:
                 max_k_L = np.transpose(J_inv_L) * max_kj_L * J_inv_L
                 max_kp_R = np.transpose(Jp_inv_R) * max_k_R * Jp_inv_R
                 max_kp_L = np.transpose(Jp_inv_L) * max_k_L * Jp_inv_L
-                des_Fp_R = max_kp_R * (r * (des_p_R - p_R))
-                des_Fp_L = max_kp_L * (r * (des_p_L - p_L))
+                max_kp_R[0,1] = 0.0
+                max_kp_R[1,0] = 0.0
+                max_kp_L[0,1] = 0.0
+                max_kp_L[1,0] = 0.0
+                des_Fp_R = max_kp_R * (r * (des_p_R - p_R)) * 0.9
+                des_Fp_L = max_kp_L * (r * (des_p_L - p_L)) * 0.9
                 des_F_R = np.transpose(Jp_R) * des_Fp_R
                 des_F_L = np.transpose(Jp_L) * des_Fp_L
                 des_tau_R = np.transpose(J_R) * des_F_R
                 des_tau_L = np.transpose(J_L) * des_F_L
+                if Rj[1,0] > -0.2: des_tau_R += np.array([[0.0],[-0.05]])
+                if Lj[1,0] > -0.2: des_tau_L += np.array([[0.0],[-0.05]])
+                if Rj[1,0] < -1.8: des_tau_R += np.array([[0.0],[0.05]])
+                if Lj[1,0] < -1.8: des_tau_L += np.array([[0.0],[0.05]])
+                
+                if Rj[0,0] > 0: des_tau_R += np.array([[-0.05],[0.0]])
+                if Lj[0,0] < 0: des_tau_L += np.array([[0.05],[0.0]])
+                if Rj[0,0] < -0.8: des_tau_R += np.array([[0.05],[0.0]])
+                if Lj[0,0] > 0.8: des_tau_L += np.array([[-0.05],[0.0]])
+                
+                
                 des_mR = (np.transpose(self.R_j_inv)*des_tau_R / (2*self.Ksc) + self.R_j * Rj) / self.Rm 
                 des_mL = (np.transpose(self.R_j_inv_L)*des_tau_L / (2*self.Ksc) + self.R_j_L * Lj) / self.Rm
                 
-                # act_Rj1.write(np.min([np.max([des_mR[0,0] * 180.0 / np.pi * 0.117258, -10.0]),10.0]))
-                # act_Rj2.write(np.min([np.max([des_mR[1,0] * 180.0 / np.pi * 0.117541, -10.0]),10.0]))
-                # act_Lj1.write(np.min([np.max([des_mL[0,0] * 180.0 / np.pi * 0.117729, -10.0]),10.0]))
-                # act_Lj2.write(np.min([np.max([des_mL[1,0] * 180.0 / np.pi * 0.117679, -10.0]),10.0]))
+                act_Rj1.write(np.min([np.max([des_mR[0,0] * 180.0 / np.pi * 0.117258, -10.0]),10.0]))
+                act_Rj2.write(np.min([np.max([des_mR[1,0] * 180.0 / np.pi * 0.117541, -10.0]),10.0]))
+                act_Lj1.write(np.min([np.max([des_mL[0,0] * 180.0 / np.pi * 0.117729, -10.0]),10.0]))
+                act_Lj2.write(np.min([np.max([des_mL[1,0] * 180.0 / np.pi * 0.117679, -10.0]),10.0]))
                 
                 time.sleep(0.004)
                 
@@ -353,10 +386,11 @@ class RolloutWorker:
                                               ((e_sensor -2.9440)/0.0148* np.pi / 180.0 - p_R[1,0]) , ((e_sensor -2.9440)/0.0148* np.pi / 180.0 - p_L[1,0]), 
                                               (self.g[0][0] - (e_sensor -2.9440)/0.0148 * np.pi / 180.0),
                                               des_Fp_R[0,0] * 0.1, des_Fp_L[0,0] * 0.1, 
+                                              vel_R[0,0], vel_R[1,0], vel_L[0,0], vel_L[1,0],
                                               self.stiffness, self.stiffness_lim]])
                 
                 obs_dict_new = dict(observation=observation, 
-                                    achieved_goal=np.array([[((e_sensor -2.9440)/0.0148) * np.pi / 180.0, des_Fp_R[0,0] * 0.1, des_Fp_L[0,0] * 0.1]]), 
+                                    achieved_goal=np.array([[((e_sensor -2.9440)/0.0148) * np.pi / 180.0, vel_R[0,0], vel_R[1,0], vel_L[0,0], vel_L[1,0], des_Fp_R[0,0] * 0.1, des_Fp_L[0,0] * 0.1]]), 
                                     desired_goal = self.g)
                 done = [False] if t < self.T-1 else [True]
                 info = [{

@@ -57,11 +57,6 @@ init_mean = np.array([gym_env.env.sim.model.tendon_frictionloss[gym_env.env.sim.
                       1e-6,
                       ])
 
-init_mean = np.array([ 7.05016422e+03, 1.15460815e+04, 8.29773002e+03, 1.05545188e+04
-, 1.60179110e-01, 1.22531696e+00, 1.95867776e-01, 1.43976498e+00
-, 4.05156613e-02, 4.66119940e-02, 4.51858451e-02, 3.29034772e-02
-, 2.66864821e-02, 3.49185662e-02, -1.91485966e-03, -1.95716563e-02
-, -2.00629219e-02, -3.50941636e-02])
 mean.append(init_mean) # from the model
 min_values = init_mean * 1e-1
 min_values[-8:] = np.array([1e-6, 1e-6, 1e-6, 1e-6, -0.2, -0.2, -0.2, -0.2])

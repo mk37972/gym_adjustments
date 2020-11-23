@@ -9,6 +9,8 @@ import mj_envs
 from mjrl.utils.gym_env import GymEnv
 from collections import defaultdict
 import tensorflow as tf
+from tfdeterminism import patch
+patch()
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 import numpy as np
 import copy
@@ -264,7 +266,6 @@ def main(args):
         
         infos_list = []
         episodeInfo = []
-        max_force = 0
         for k in range(50000):
             if state is not None:
                 actions, _, state, _ = model.step(obs,S=state, M=dones)
@@ -272,9 +273,8 @@ def main(args):
                 actions, _, _, _ = model.step(obs)
                 
             distance = np.linalg.norm(obs['achieved_goal'][0][:3] - obs['desired_goal'][0][:3])
-            force = - env.envs[0].env.prev_lforce - env.envs[0].env.prev_rforce
-            if force > max_force: max_force = force
-            # force = env.envs[0].env.prev_oforce
+            # force = - env.envs[0].env.prev_lforce - env.envs[0].env.prev_rforce
+            force = env.envs[0].env.prev_oforce
             # print(force, env.envs[0].env.object_fragility, force>env.envs[0].env.object_fragility)
             # print(obs['observation'][0][11:13] ,actions)
             
@@ -311,9 +311,6 @@ def main(args):
                 np.random.seed(seed)
                 set_global_seeds(seed)
                 
-                print(max_force)
-                max_force = 0
-                
         
                     
 #        fileName = "StiffnessCtrl_Demo"
@@ -327,7 +324,8 @@ def main(args):
             fileName += ".npz"
             np.savez_compressed(fileName, force=forces_list, dist=distance_list)
 
-    env.close()
+    try: env.close()
+    except: pass
 
     return model
 

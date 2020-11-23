@@ -202,9 +202,9 @@ class NuFingersEnv(robot_env.RobotEnv):
         p_L = np.array([[l_L],[np.arctan2(Prel_L[1],Prel_L[0])]])
         
         obj_rot = self.sim.data.qpos[self.sim.model.jnt_qposadr[self.sim.model.joint_name2id('Sensor_joint')]]
-        observation = np.array([p_R[0,0], p_L[0,0], p_R[1,0], p_L[1,0], 
+        observation = np.array([p_R[0,0] * 10 - 1.0, p_L[0,0] * 10 - 1.0, p_R[1,0], p_L[1,0],
                                 (obj_rot - p_R[1,0]), (obj_rot - p_L[1,0]), 
-                                (self.goal[0] - obj_rot), (self.goal[0] - obj_rot),
+                                (self.goal[0] - obj_rot),
                                 l_finger_force * 0.1, r_finger_force * 0.1, 
                                 self.prev_stiffness, self.prev_stiffness_limit])
         

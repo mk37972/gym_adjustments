@@ -73,7 +73,7 @@ class DDPG(object):
         self.dimu = self.input_dims['u']
         
         self.success_rate = 0
-        self.success_ref = 0.85
+        self.success_ref = 0.65
         self.stats_qf = []
         
         # self.bc_loss = tf.Variable(1.0)
@@ -285,7 +285,8 @@ class DDPG(object):
         
         if self.bc_loss: #use demonstration buffer to sample as well if bc_loss flag is set TRUE
             transitions =  self.buffer.sample(self.batch_size - self.demo_batch_size) #if self.n_epoch < 50 else self.buffer.sample(self.batch_size - np.int(self.demo_batch_size * np.power(0.99, self.n_epoch - 50)))
-            num_self_imitation = (self.demo_batch_size *(np.tanh((self.success_rate-self.success_ref)*50.0)+1.0)/2.0).astype(np.int) if self.success_rate - self.success_ref < 0.05 else self.demo_batch_size
+            # num_self_imitation = (self.demo_batch_size *(np.tanh((self.success_rate-self.success_ref)*100.0)+1.0)/2.0).astype(np.int) if self.success_rate - self.success_ref < 0.05 else self.demo_batch_size
+            num_self_imitation = 0
             if num_self_imitation > 0:
                 transitions_demo_self = self.buffer.sample(num_self_imitation)
                 for k, values in transitions_demo_self.items():
@@ -319,9 +320,9 @@ class DDPG(object):
         self.sess.run(self.stage_op, feed_dict=dict(zip(self.buffer_ph_tf, batch)))
 
     def train(self, stage=True):
-        # if self.bc_loss and (self.success_rate > self.success_ref):
-        #     global DEMO_BUFFER
-        #     DEMO_BUFFER = self.buffer
+        if self.bc_loss and (self.success_rate > self.success_ref):
+            global DEMO_BUFFER
+            DEMO_BUFFER = self.buffer
         if stage:
             self.stage_batch()
         critic_loss, actor_loss, Q_grad, pi_grad, mask = self._grads()
@@ -409,6 +410,7 @@ class DDPG(object):
             self.pi_loss_tf += self.aux_loss_weight * self.cloning_loss_tf
 
         else: #If  not training with demonstrations
+            self.maskMain = tf.constant([0.0])
             self.pi_loss_tf = -tf.reduce_mean(self.main.Q_pi_tf)
             self.pi_loss_tf += self.action_l2 * tf.reduce_mean(tf.square(self.main.pi_tf / self.max_u))
 

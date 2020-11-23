@@ -145,10 +145,10 @@ def configure_her(params):
             
             try: 
                 d = np.linalg.norm(achieved_goal[:,0] - desired_goal[:,0], axis=-1)
-                fragile_goal = np.linalg.norm((achieved_goal[:,1:] - desired_goal[:,1:])*((achieved_goal[:,1:] - desired_goal[:,1:]) < 0), axis=-1)
+                fragile_goal = np.linalg.norm((achieved_goal[:,1:5] - desired_goal[:,1:5]), axis=-1) + np.linalg.norm((achieved_goal[:,5:] - desired_goal[:,5:])*((achieved_goal[:,5:] - desired_goal[:,5:]) < 0), axis=-1)
             except:
                 d = np.linalg.norm(achieved_goal[0] - desired_goal[0], axis=-1)
-                fragile_goal = np.linalg.norm((achieved_goal[1:] - desired_goal[1:])*((achieved_goal[1:] - desired_goal[1:]) < 0), axis=-1)
+                fragile_goal = np.linalg.norm((achieved_goal[1:5] - desired_goal[1:5]), axis=-1) + np.linalg.norm((achieved_goal[5:] - desired_goal[5:])*((achieved_goal[5:] - desired_goal[5:]) < 0), axis=-1)
             return -(d > np.pi/16).astype(np.float32) - np.float32(fragile_goal) * 2.0
             
 
